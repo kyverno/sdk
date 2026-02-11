@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	go.uber.org/multierr v1.11.0
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93
-	k8s.io/apimachinery v0.35.0
+	k8s.io/apimachinery v0.35.1
 	sigs.k8s.io/controller-runtime v0.23.1
 )
 
