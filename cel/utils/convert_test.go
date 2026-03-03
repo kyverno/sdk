@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,31 +12,38 @@ import (
 )
 
 func TestConvertToNative(t *testing.T) {
-	tests := []struct {
-		name    string
-		value   ref.Val
-		want    any
-		wantErr bool
-	}{{
-		name:  "bool ok",
-		value: types.False,
-		want:  false,
-	}, {
-		name:    "string ko",
-		value:   types.String("false"),
-		wantErr: true,
-	}}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ConvertToNative[bool](tt.value)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.want, got)
-			}
-		})
-	}
+	t.Run("bool", func(t *testing.T) {
+		got, err := ConvertToNative[bool](types.False)
+		assert.NoError(t, err)
+		assert.False(t, got)
+		got, err = ConvertToNative[bool](types.True)
+		assert.NoError(t, err)
+		assert.True(t, got)
+		_, err = ConvertToNative[bool](types.String("false"))
+		assert.Error(t, err)
+	})
+	t.Run("string", func(t *testing.T) {
+		got, err := ConvertToNative[string](types.String("hello"))
+		assert.NoError(t, err)
+		assert.Equal(t, "hello", got)
+	})
+	t.Run("int", func(t *testing.T) {
+		got, err := ConvertToNative[int](types.Int(42))
+		assert.NoError(t, err)
+		assert.Equal(t, 42, got)
+		_, err = ConvertToNative[int](types.True)
+		assert.Error(t, err)
+	})
+	t.Run("int64", func(t *testing.T) {
+		got, err := ConvertToNative[int64](types.Int(1 << 40))
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1<<40), got)
+	})
+	t.Run("float64", func(t *testing.T) {
+		got, err := ConvertToNative[float64](types.Double(3.14))
+		assert.NoError(t, err)
+		assert.Equal(t, 3.14, got)
+	})
 }
 
 func TestConvertObjectToUnstructured(t *testing.T) {
