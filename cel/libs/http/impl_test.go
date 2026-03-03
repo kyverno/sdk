@@ -66,11 +66,22 @@ func Test_impl_get_request(t *testing.T) {
 	prog, err := env.Program(ast)
 	assert.NoError(t, err)
 	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					assert.Equal(t, req.URL.String(), "http://localhost:8080")
+					assert.Equal(t, req.Method, "GET")
 
-	out, _, err := prog.Eval(map[string]any{})
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
+				},
+			},
+		}},
+	})
 	assert.NoError(t, err)
 	body := out.Value().(map[string]any)
 	assert.Equal(t, body["body"], "ok")
+	assert.Equal(t, body["statusCode"], http.StatusOK)
 }
 
 func Test_impl_get_request_with_headers(t *testing.T) {
@@ -102,11 +113,23 @@ func Test_impl_get_request_with_headers(t *testing.T) {
 	prog, err := env.Program(ast)
 	assert.NoError(t, err)
 	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					assert.Equal(t, req.URL.String(), "http://localhost:8080")
+					assert.Equal(t, req.Method, "GET")
+					assert.Equal(t, req.Header.Get("Authorization"), "Bearer token")
 
-	out, _, err := prog.Eval(map[string]any{})
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
+				},
+			},
+		}},
+	})
 	assert.NoError(t, err)
 	body := out.Value().(map[string]any)
 	assert.Equal(t, body["body"], "ok")
+	assert.Equal(t, body["statusCode"], http.StatusOK)
 }
 
 func Test_impl_get_request_with_client_string_error(t *testing.T) {
@@ -188,6 +211,7 @@ func Test_impl_post_request(t *testing.T) {
 	assert.NoError(t, err)
 	body := out.Value().(map[string]any)
 	assert.Equal(t, body["body"], "ok")
+	assert.Equal(t, body["statusCode"], http.StatusOK)
 }
 
 func Test_impl_post_request_with_headers(t *testing.T) {
@@ -229,6 +253,7 @@ func Test_impl_post_request_with_headers(t *testing.T) {
 	assert.NoError(t, err)
 	body := out.Value().(map[string]any)
 	assert.Equal(t, body["body"], "ok")
+	assert.Equal(t, body["statusCode"], http.StatusOK)
 }
 
 func Test_impl_post_request_string_with_client_error(t *testing.T) {
@@ -334,4 +359,219 @@ func Test_impl_http_client_string_error(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func Test_impl_get_request_with_404_status_code(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+	options := []cel.EnvOption{
+		cel.Variable("http", ContextType),
+		Lib(nil, nil),
+	}
+	env, err := base.Extend(options...)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Get("http://localhost:8080/notfound")`)
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusNotFound,
+						Body:       io.NopCloser(strings.NewReader(`{"error": "not found"}`)),
+					}, nil
+				},
+			},
+		}},
+	})
+	assert.NoError(t, err)
+	body := out.Value().(map[string]any)
+	assert.Equal(t, body["error"], "not found")
+	assert.Equal(t, body["statusCode"], http.StatusNotFound)
+}
+
+func Test_impl_get_request_with_500_status_code(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+	options := []cel.EnvOption{
+		cel.Variable("http", ContextType),
+		Lib(nil, nil),
+	}
+	env, err := base.Extend(options...)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Get("http://localhost:8080/error")`)
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusInternalServerError,
+						Body:       io.NopCloser(strings.NewReader(`{"error": "internal server error"}`)),
+					}, nil
+				},
+			},
+		}},
+	})
+	assert.NoError(t, err)
+	body := out.Value().(map[string]any)
+	assert.Equal(t, body["error"], "internal server error")
+	assert.Equal(t, body["statusCode"], http.StatusInternalServerError)
+}
+
+func Test_impl_post_request_with_201_status_code(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+	options := []cel.EnvOption{
+		cel.Variable("http", ContextType),
+		Lib(nil, nil),
+	}
+	env, err := base.Extend(options...)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Post("http://localhost:8080", {"key": "value"})`)
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusCreated,
+						Body:       io.NopCloser(strings.NewReader(`{"id": "123"}`)),
+					}, nil
+				},
+			},
+		}},
+	})
+	assert.NoError(t, err)
+	body := out.Value().(map[string]any)
+	assert.Equal(t, body["id"], "123")
+	assert.Equal(t, body["statusCode"], http.StatusCreated)
+}
+
+func Test_impl_get_request_with_non_json_body(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+	options := []cel.EnvOption{
+		cel.Variable("http", ContextType),
+		Lib(nil, nil),
+	}
+	env, err := base.Extend(options...)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Get("http://localhost:8080/text")`)
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       io.NopCloser(strings.NewReader(`this is not json`)),
+					}, nil
+				},
+			},
+		}},
+	})
+	assert.NoError(t, err)
+	body := out.Value().(map[string]any)
+	// When body parsing fails, body is nil and we wrap it
+	assert.Nil(t, body["body"])
+	assert.Equal(t, body["statusCode"], http.StatusOK)
+}
+
+func Test_impl_get_request_with_array_response(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+	options := []cel.EnvOption{
+		cel.Variable("http", ContextType),
+		Lib(nil, nil),
+	}
+	env, err := base.Extend(options...)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Get("http://localhost:8080/array")`)
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       io.NopCloser(strings.NewReader(`[{"item": 1}, {"item": 2}]`)),
+					}, nil
+				},
+			},
+		}},
+	})
+	assert.NoError(t, err)
+	result := out.Value().(map[string]any)
+	// Array responses are wrapped
+	assert.Equal(t, result["statusCode"], http.StatusOK)
+	bodyArray := result["body"].([]any)
+	assert.Len(t, bodyArray, 2)
+	assert.Equal(t, bodyArray[0].(map[string]any)["item"], float64(1))
+}
+
+func Test_impl_post_request_with_400_bad_request(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+	options := []cel.EnvOption{
+		cel.Variable("http", ContextType),
+		Lib(nil, nil),
+	}
+	env, err := base.Extend(options...)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Post("http://localhost:8080", {"invalid": "data"})`)
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusBadRequest,
+						Body:       io.NopCloser(strings.NewReader(`{"error": "invalid request", "code": "INVALID_DATA"}`)),
+					}, nil
+				},
+			},
+		}},
+	})
+	assert.NoError(t, err)
+	body := out.Value().(map[string]any)
+	assert.Equal(t, body["error"], "invalid request")
+	assert.Equal(t, body["code"], "INVALID_DATA")
+	assert.Equal(t, body["statusCode"], http.StatusBadRequest)
 }
