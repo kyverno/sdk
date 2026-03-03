@@ -38,6 +38,8 @@ func (i *impl) marshal(jsonObj ref.Val, value ref.Val) ref.Val {
 	}
 }
 
+// toJsonNative converts a CEL ref.Val to a native Go value
+// suitable for JSON marshaling (map, list, or primitive).
 func toJsonNative(val ref.Val) (any, error) {
 	switch val.Type() {
 	case types.MapType:
