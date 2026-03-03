@@ -21,7 +21,7 @@ func Test_impl_get_resource_string_string_string_string(t *testing.T) {
 
 	ctx := Context{
 		&ContextMock{
-			GetResourceFunc: func(apiVersion, resource, namespace, name string) (*unstructured.Unstructured, error) {
+			GetResourceFunc: func(apiVersion, resource, namespace, name string, subresources ...string) (*unstructured.Unstructured, error) {
 				return &unstructured.Unstructured{
 					Object: map[string]any{
 						"apiVersion": "apps/v1",
@@ -43,6 +43,51 @@ func Test_impl_get_resource_string_string_string_string(t *testing.T) {
 	assert.NotNil(t, env)
 	ast, issues := env.Compile(`resource.Get("apps/v1", "deployments", "default", "nginx")`)
 	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+
+	out, _, err := prog.Eval(map[string]any{})
+	assert.NoError(t, err)
+	object := out.Value().(map[string]any)
+	assert.Equal(t, object["apiVersion"].(string), "apps/v1")
+	assert.Equal(t, object["kind"].(string), "Deployment")
+}
+
+func Test_impl_get_resource_string_string_string_string_stringlist(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+
+	ctx := Context{
+		&ContextMock{
+			GetResourceFunc: func(apiVersion, resource, namespace, name string, subresources ...string) (*unstructured.Unstructured, error) {
+				return &unstructured.Unstructured{
+					Object: map[string]any{
+						"apiVersion": "apps/v1",
+						"kind":       "Deployment",
+						"metadata": map[string]any{
+							"name":      name,
+							"namespace": namespace,
+						},
+					},
+				}, nil
+			},
+		},
+	}
+
+	env, err := base.Extend(
+		Lib(&ctx, "", nil),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`resource.Get("apps/v1", "deployments", "default", "nginx", ["status"])`)
+	if !assert.Nil(t, issues) {
+		for _, issue := range issues.Errors() {
+			t.Logf("issue: %v", issue.Message)
+		}
+	}
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
 	assert.NoError(t, err)
@@ -95,7 +140,7 @@ func Test_impl_get_resource_string_string_string_string_error(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &impl{}
+			c := &impl{Adapter: env.CELTypeAdapter()}
 			got := c.get_resource_string_string_string_string(tt.args...)
 			assert.Equal(t, tt.want, got)
 		})
@@ -232,7 +277,7 @@ func Test_impl_list_resources_string_string_string_error(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &impl{}
+			c := &impl{Adapter: env.CELTypeAdapter()}
 			got := c.list_resources_string_string_string(tt.args...)
 			assert.Equal(t, tt.want, got)
 		})
@@ -333,7 +378,7 @@ func Test_impl_post_resource_string_string_string_map_error(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &impl{}
+			c := &impl{Adapter: env.CELTypeAdapter()}
 			got := c.post_resource_string_string_string_map(tt.args...)
 			assert.Equal(t, tt.want, got)
 		})
@@ -361,7 +406,7 @@ func Test_impl_post_resource_string_string_map_error(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &impl{}
+			c := &impl{Adapter: env.CELTypeAdapter()}
 			got := c.post_resource_string_string_map(tt.args...)
 			assert.Equal(t, tt.want, got)
 		})
@@ -409,7 +454,7 @@ func Test_impl_get_resource_forbidden_error(t *testing.T) {
 
 	ctx := Context{
 		&ContextMock{
-			GetResourceFunc: func(apiVersion, resource, namespace, name string) (*unstructured.Unstructured, error) {
+			GetResourceFunc: func(apiVersion, resource, namespace, name string, subresources ...string) (*unstructured.Unstructured, error) {
 				return nil, apierrors.NewForbidden(
 					schema.GroupResource{Group: "apps", Resource: "deployments"},
 					"nginx",

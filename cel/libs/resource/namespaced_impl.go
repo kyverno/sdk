@@ -82,9 +82,9 @@ func (c *namespacedImpl) list_resources_gvr_map(args ...ref.Val) ref.Val {
 	}
 }
 
-func (c *namespacedImpl) get_resource_string_string_string(args ...ref.Val) ref.Val {
-	if len(args) != 4 {
-		return types.NewErr("expected 4 arguments, got %d", len(args))
+func (c *namespacedImpl) get_resource_string_string_string_stringlist(args ...ref.Val) ref.Val {
+	if len(args) != 5 {
+		return types.NewErr("expected 5 arguments, got %d", len(args))
 	}
 	if self, err := utils.GetArg[Context](args, 0); err != nil {
 		return err
@@ -94,8 +94,10 @@ func (c *namespacedImpl) get_resource_string_string_string(args ...ref.Val) ref.
 		return err
 	} else if name, err := utils.GetArg[string](args, 3); err != nil {
 		return err
+	} else if subresources, err := utils.GetArg[[]string](args, 4); err != nil {
+		return err
 	} else {
-		res, err := self.GetResource(apiVersion, resource, c.namespace, name)
+		res, err := self.GetResource(apiVersion, resource, c.namespace, name, subresources...)
 		if err != nil {
 			if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
 				return types.NewErr("failed to get resource: permission denied: %v", err)
@@ -106,15 +108,31 @@ func (c *namespacedImpl) get_resource_string_string_string(args ...ref.Val) ref.
 	}
 }
 
-func (c *namespacedImpl) get_resources_gvr_string(args ...ref.Val) ref.Val {
-	if len(args) != 3 {
-		return types.NewErr("expected 3 arguments, got %d", len(args))
+func (c *namespacedImpl) get_resource_string_string_string(args ...ref.Val) ref.Val {
+	if len(args) != 4 {
+		return types.NewErr("expected 4 arguments, got %d", len(args))
+	}
+
+	return c.get_resource_string_string_string_stringlist(args[0], args[1], args[2], args[3], c.NativeToValue([]string{}))
+}
+
+func (c *namespacedImpl) get_resources_gvr_string_stringlist(args ...ref.Val) ref.Val {
+	if len(args) != 4 {
+		return types.NewErr("expected 4 arguments, got %d", len(args))
 	}
 	if gvr, err := utils.GetArg[*schema.GroupVersionResource](args, 1); err != nil {
 		return err
 	} else {
-		return c.get_resource_string_string_string(args[0], types.String(gvr.GroupVersion().String()), types.String(gvr.Resource), args[2])
+		return c.get_resource_string_string_string_stringlist(args[0], types.String(gvr.GroupVersion().String()), types.String(gvr.Resource), args[2], args[3])
 	}
+}
+
+func (c *namespacedImpl) get_resources_gvr_string(args ...ref.Val) ref.Val {
+	if len(args) != 3 {
+		return types.NewErr("expected 3 arguments, got %d", len(args))
+	}
+
+	return c.get_resources_gvr_string_stringlist(args[0], args[1], args[2], c.NativeToValue([]string{}))
 }
 
 func (c *namespacedImpl) post_resource_string_string_map(args ...ref.Val) ref.Val {

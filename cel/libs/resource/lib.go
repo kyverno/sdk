@@ -103,6 +103,18 @@ func (l *lib) namespacedEnv(env *cel.Env) (*cel.Env, error) {
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.get_resources_gvr_string),
 			),
+			cel.MemberOverload(
+				"resource_get_gvr_string_stringlist",
+				[]*cel.Type{ContextType, GVRType, types.StringType, types.NewListType(types.StringType)},
+				types.NewMapType(types.StringType, types.AnyType),
+				cel.FunctionBinding(impl.get_resources_gvr_string_stringlist),
+			),
+			cel.MemberOverload(
+				"resource_get_string_string_string_stringlist",
+				[]*cel.Type{ContextType, types.StringType, types.StringType, types.StringType, types.NewListType(types.StringType)},
+				types.NewMapType(types.StringType, types.AnyType),
+				cel.FunctionBinding(impl.get_resource_string_string_string_stringlist),
+			),
 		},
 		"Post": {
 			cel.MemberOverload(
@@ -174,6 +186,18 @@ func (l *lib) clusterEnv(env *cel.Env) (*cel.Env, error) {
 				[]*cel.Type{ContextType, GVRType, types.StringType, types.StringType},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.get_resources_gvr_string_string),
+			),
+			cel.MemberOverload(
+				"resource_get_string_string_string_string_stringlist",
+				[]*cel.Type{ContextType, types.StringType, types.StringType, types.StringType, types.StringType, types.NewListType(types.StringType)},
+				types.NewMapType(types.StringType, types.AnyType),
+				cel.FunctionBinding(impl.get_resource_string_string_string_string_stringlist),
+			),
+			cel.MemberOverload(
+				"resource_get_gvr_string_string_stringlist",
+				[]*cel.Type{ContextType, GVRType, types.StringType, types.StringType, types.NewListType(types.StringType)},
+				types.NewMapType(types.StringType, types.AnyType),
+				cel.FunctionBinding(impl.get_resources_gvr_string_string_stringlist),
 			),
 		},
 		"Post": {

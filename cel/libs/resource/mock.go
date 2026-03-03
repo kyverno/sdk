@@ -7,7 +7,7 @@ import (
 
 type ContextMock struct {
 	ListResourcesFunc func(string, string, string, map[string]string) (*unstructured.UnstructuredList, error)
-	GetResourceFunc   func(string, string, string, string) (*unstructured.Unstructured, error)
+	GetResourceFunc   func(string, string, string, string, ...string) (*unstructured.Unstructured, error)
 	PostResourceFunc  func(string, string, string, map[string]any) (*unstructured.Unstructured, error)
 	ToGVRFunc         func(string, string) (*schema.GroupVersionResource, error)
 }
@@ -16,8 +16,8 @@ func (mock *ContextMock) ListResources(apiVersion, resource, namespace string, l
 	return mock.ListResourcesFunc(apiVersion, resource, namespace, labels)
 }
 
-func (mock *ContextMock) GetResource(apiVersion, resource, namespace, name string) (*unstructured.Unstructured, error) {
-	return mock.GetResourceFunc(apiVersion, resource, namespace, name)
+func (mock *ContextMock) GetResource(apiVersion, resource, namespace, name string, subresources ...string) (*unstructured.Unstructured, error) {
+	return mock.GetResourceFunc(apiVersion, resource, namespace, name, subresources...)
 }
 
 func (mock *ContextMock) PostResource(apiVersion, resource, namespace string, data map[string]any) (*unstructured.Unstructured, error) {
