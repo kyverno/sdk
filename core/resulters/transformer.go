@@ -38,10 +38,10 @@ func NewTransformer[
 	}
 }
 
-func (r *transformer[POLICY, IN, OUT, TRANFO, RESULT, TRANSFORESULT]) Collect(ctx context.Context, policy POLICY, in IN, out OUT) {
+func (r *transformer[POLICY, IN, OUT, TRANSFO, RESULT, TRANSFORESULT]) Collect(ctx context.Context, policy POLICY, in IN, out OUT) {
 	r.inner.Collect(ctx, policy, in, r.collect(policy, in, out))
 }
 
-func (r *transformer[POLICY, IN, OUT, TRANFO, RESULT, TRANSFORESULT]) Result() TRANSFORESULT {
+func (r *transformer[POLICY, IN, OUT, TRANSFO, RESULT, TRANSFORESULT]) Result() TRANSFORESULT {
 	return r.result(r.inner.Result())
 }
