@@ -47,7 +47,7 @@ func TestApiSource_Reconcile_ThenLoad_ReturnsObject(t *testing.T) {
 
 	result, err := src.Reconcile(ctx, req)
 	assert.NoError(t, err)
-	assert.False(t, result.Requeue)
+	assert.Zero(t, result.RequeueAfter)
 
 	list, err := src.Load(ctx)
 	assert.NoError(t, err)
@@ -85,7 +85,7 @@ func TestApiSource_Reconcile_NonexistentKey_DoesNotRemoveExistingEntries(t *test
 	req2.Name = "nonexistent"
 	result, err := src.Reconcile(ctx, req2)
 	assert.NoError(t, err)
-	assert.False(t, result.Requeue)
+	assert.Zero(t, result.RequeueAfter)
 
 	// Original object still in cache
 	list, _ = src.Load(ctx)
@@ -121,7 +121,7 @@ func TestApiSource_Reconcile_NotFound_RemovesKeyFromCache(t *testing.T) {
 	req.Name = "cm1"
 	result, err := src.Reconcile(ctx, req)
 	assert.NoError(t, err)
-	assert.False(t, result.Requeue)
+	assert.Zero(t, result.RequeueAfter)
 
 	list, err := src.Load(ctx)
 	assert.NoError(t, err)
