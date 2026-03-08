@@ -96,6 +96,20 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 				cel.FunctionBinding(impl.put_request_with_headers_string),
 			),
 		},
+		"Patch": {
+			cel.MemberOverload(
+				"http_patch_string_any",
+				[]*cel.Type{ContextType, types.StringType, types.AnyType},
+				types.AnyType,
+				cel.FunctionBinding(impl.patch_request_string),
+			),
+			cel.MemberOverload(
+				"http_patch_string_any_headers",
+				[]*cel.Type{ContextType, types.StringType, types.AnyType, types.NewMapType(types.StringType, types.StringType)},
+				types.AnyType,
+				cel.FunctionBinding(impl.patch_request_with_headers_string),
+			),
+		},
 		"Client": {
 			cel.MemberOverload(
 				"http_client_string",
