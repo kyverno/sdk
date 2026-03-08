@@ -84,6 +84,17 @@ func (r *contextImpl) Patch(url string, data any, headers map[string]string) (an
 	return r.executeRequest(r.client, req)
 }
 
+func (r *contextImpl) Delete(url string, headers map[string]string) (any, error) {
+	req, err := http.NewRequestWithContext(context.TODO(), "DELETE", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	for h, v := range headers {
+		req.Header.Add(h, v)
+	}
+	return r.executeRequest(r.client, req)
+}
+
 func (r *contextImpl) executeRequest(client ClientInterface, req *http.Request) (any, error) {
 	resp, err := client.Do(req)
 	if err != nil {

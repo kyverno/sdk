@@ -11,6 +11,7 @@ type ContextInterface interface {
 	Post(url string, data any, headers map[string]string) (any, error)
 	Put(url string, data any, headers map[string]string) (any, error)
 	Patch(url string, data any, headers map[string]string) (any, error)
+	Delete(url string, headers map[string]string) (any, error)
 	Client(caBundle string) (ContextInterface, error)
 }
 
