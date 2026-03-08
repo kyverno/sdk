@@ -82,6 +82,48 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 				cel.FunctionBinding(impl.post_request_with_headers_string),
 			),
 		},
+		"Put": {
+			cel.MemberOverload(
+				"http_put_string_any",
+				[]*cel.Type{ContextType, types.StringType, types.AnyType},
+				types.AnyType,
+				cel.FunctionBinding(impl.put_request_string),
+			),
+			cel.MemberOverload(
+				"http_put_string_any_headers",
+				[]*cel.Type{ContextType, types.StringType, types.AnyType, types.NewMapType(types.StringType, types.StringType)},
+				types.AnyType,
+				cel.FunctionBinding(impl.put_request_with_headers_string),
+			),
+		},
+		"Patch": {
+			cel.MemberOverload(
+				"http_patch_string_any",
+				[]*cel.Type{ContextType, types.StringType, types.AnyType},
+				types.AnyType,
+				cel.FunctionBinding(impl.patch_request_string),
+			),
+			cel.MemberOverload(
+				"http_patch_string_any_headers",
+				[]*cel.Type{ContextType, types.StringType, types.AnyType, types.NewMapType(types.StringType, types.StringType)},
+				types.AnyType,
+				cel.FunctionBinding(impl.patch_request_with_headers_string),
+			),
+		},
+		"Delete": {
+			cel.MemberOverload(
+				"http_delete_string",
+				[]*cel.Type{ContextType, types.StringType},
+				types.AnyType,
+				cel.BinaryBinding(impl.delete_request_string),
+			),
+			cel.MemberOverload(
+				"http_delete_string_headers",
+				[]*cel.Type{ContextType, types.StringType, types.NewMapType(types.StringType, types.StringType)},
+				types.AnyType,
+				cel.FunctionBinding(impl.delete_request_with_headers_string),
+			),
+		},
 		"Client": {
 			cel.MemberOverload(
 				"http_client_string",
