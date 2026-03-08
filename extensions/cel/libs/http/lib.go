@@ -108,6 +108,23 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 		}
 	}
 
+	buildPatchOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
+			cel.MemberOverload(
+				fmt.Sprintf("http_patch_string_any_%s", suffix),
+				[]*cel.Type{ContextType, types.StringType, types.AnyType},
+				types.AnyType,
+				cel.FunctionBinding(impl.patch_request_string),
+			),
+			cel.MemberOverload(
+				fmt.Sprintf("http_patch_string_any_headers_%s", suffix),
+				[]*cel.Type{ContextType, types.StringType, types.AnyType, types.NewMapType(types.StringType, types.StringType)},
+				types.AnyType,
+				cel.FunctionBinding(impl.patch_request_with_headers_string),
+			),
+		}
+	}
+
 	buildClientOverloads := func(suffix string) []cel.FunctionOpt {
 		return []cel.FunctionOpt{
 			cel.MemberOverload(
@@ -123,6 +140,7 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 		"Get":    buildGetOverloads("pascal"),
 		"Post":   buildPostOverloads("pascal"),
 		"Put":    buildPutOverloads("pascal"),
+		"Patch":  buildPatchOverloads("pascal"),
 		"Client": buildClientOverloads("pascal"),
 	}
 
@@ -130,6 +148,7 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 		libraryDecls["get"] = buildGetOverloads("camel")
 		libraryDecls["post"] = buildPostOverloads("camel")
 		libraryDecls["put"] = buildPutOverloads("camel")
+		libraryDecls["patch"] = buildPatchOverloads("camel")
 		libraryDecls["client"] = buildClientOverloads("camel")
 	}
 	// create env options corresponding to our function overloads
