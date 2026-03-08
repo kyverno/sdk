@@ -976,3 +976,136 @@ func Test_impl_patch_request_string_with_client_error(t *testing.T) {
 		})
 	}
 }
+
+func Test_impl_delete_request(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+
+	ctx := Context{&contextImpl{
+		client: testClient{
+			doFunc: func(req *http.Request) (*http.Response, error) {
+				assert.Equal(t, req.URL.String(), "http://localhost:8080/resource/123")
+				assert.Equal(t, req.Method, "DELETE")
+
+				return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(``))}, nil
+			},
+		},
+	}}
+
+	env, err := base.Extend(
+		Lib(&ctx, version.MajorMinor(1, 18)),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Delete("http://localhost:8080/resource/123")`)
+	fmt.Println(issues.String())
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					assert.Equal(t, req.URL.String(), "http://localhost:8080/resource/123")
+					assert.Equal(t, req.Method, "DELETE")
+
+					return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(``))}, nil
+				},
+			},
+		}},
+	})
+	assert.NoError(t, err)
+	body := out.Value().(map[string]any)
+	assert.Equal(t, body["statusCode"], http.StatusNoContent)
+}
+
+func Test_impl_delete_request_with_headers(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+
+	ctx := Context{&contextImpl{
+		client: testClient{
+			doFunc: func(req *http.Request) (*http.Response, error) {
+				assert.Equal(t, req.URL.String(), "http://localhost:8080/resource/123")
+				assert.Equal(t, req.Method, "DELETE")
+				assert.Equal(t, req.Header.Get("Authorization"), "Bearer token")
+
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"message": "deleted"}`))}, nil
+			},
+		},
+	}}
+
+	env, err := base.Extend(
+		Lib(&ctx, version.MajorMinor(1, 18)),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Delete("http://localhost:8080/resource/123", {"Authorization": "Bearer token"})`)
+	fmt.Println(issues.String())
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+	out, _, err := prog.Eval(map[string]any{
+		"http": Context{&contextImpl{
+			client: testClient{
+				doFunc: func(req *http.Request) (*http.Response, error) {
+					assert.Equal(t, req.URL.String(), "http://localhost:8080/resource/123")
+					assert.Equal(t, req.Method, "DELETE")
+					assert.Equal(t, req.Header.Get("Authorization"), "Bearer token")
+
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"message": "deleted"}`))}, nil
+				},
+			},
+		}},
+	})
+	assert.NoError(t, err)
+	body := out.Value().(map[string]any)
+	assert.Equal(t, body["message"], "deleted")
+	assert.Equal(t, body["statusCode"], http.StatusOK)
+}
+
+func Test_impl_delete_request_with_client_string_error(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+
+	env, err := base.Extend(
+		Lib(nil, version.MajorMinor(1, 18)),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	tests := []struct {
+		name string
+		args []ref.Val
+		want ref.Val
+	}{{
+		name: "not enough args",
+		args: nil,
+		want: types.NewErr("expected 3 arguments, got %d", 0),
+	}, {
+		name: "bad arg 1",
+		args: []ref.Val{types.String("foo"), types.String("http://localhost:8080"), env.CELTypeAdapter().NativeToValue(make(map[string]string, 0))},
+		want: types.NewErr("invalid arg 0: unsupported native conversion from string to 'http.Context'"),
+	}, {
+		name: "bad arg 2",
+		args: []ref.Val{env.CELTypeAdapter().NativeToValue(Context{}), types.Bool(false), env.CELTypeAdapter().NativeToValue(make(map[string]string, 0))},
+		want: types.NewErr("invalid arg 1: type conversion error from bool to 'string'"),
+	}, {
+		name: "bad arg 3",
+		args: []ref.Val{env.CELTypeAdapter().NativeToValue(Context{}), types.String("http://localhost:8080"), types.Bool(false)},
+		want: types.NewErr("invalid arg 2: type conversion error from bool to 'map[string]string'"),
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &impl{}
+			got := c.delete_request_with_client_string(tt.args...)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
