@@ -6,6 +6,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/kyverno/sdk/cel/compiler"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/util/version"
 )
 
 func Test_list_of_object_to_map(t *testing.T) {
@@ -13,7 +14,7 @@ func Test_list_of_object_to_map(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		Lib(nil),
+		Lib(version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -25,7 +26,7 @@ func Test_list_of_object_to_map(t *testing.T) {
 			"kubernetes": "orchestration",
 		}
 		ast, issues := env.Compile(
-			`listObjToMap(
+			`transform.listObjToMap(
         [
             {"name": "kyverno", "lfx": "mentorship"},
             {"name": "kubernetes", "lfx": "something"}

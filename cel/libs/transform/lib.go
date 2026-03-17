@@ -1,6 +1,8 @@
 package transform
 
 import (
+	"fmt"
+
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/kyverno/sdk/cel/libs/versions"
@@ -14,12 +16,15 @@ type lib struct {
 }
 
 func Lib(v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{version: v})
 }
 
 func Latest() *version.Version {
-	return versions.TransformVersion
+	return versions.KyvernoLatest
 }
 
 func (*lib) LibraryName() string {
@@ -41,15 +46,26 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 		Adapter: env.CELTypeAdapter(),
 	}
 
-	return env.Extend(
-		cel.Function(
-			"listObjToMap",
-			cel.Overload(
-				"list_of_object_to_map",
-				[]*cel.Type{types.ListType, types.ListType, types.StringType, types.StringType},
-				types.MapType,
-				cel.FunctionBinding(impl.list_of_objects_to_map),
-			),
-		),
-	)
+	buildOverload := func(suffix string) cel.FunctionOpt {
+		return cel.Overload(
+			fmt.Sprintf("list_of_object_to_map_%s", suffix),
+			[]*cel.Type{types.ListType, types.ListType, types.StringType, types.StringType},
+			types.MapType,
+			cel.FunctionBinding(impl.list_of_objects_to_map),
+		)
+	}
+
+	env, err := env.Extend(cel.Function("listObjToMap", buildOverload("non_prefixed")))
+	if err != nil {
+		return nil, err
+	}
+
+	if c.version.AtLeast(version.MajorMinor(1, 18)) {
+		env, err = env.Extend(cel.Function("transform.listObjToMap", buildOverload("prefixed")))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return env, nil
 }
