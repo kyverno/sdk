@@ -10,16 +10,21 @@ import (
 	"k8s.io/apimachinery/pkg/util/version"
 )
 
+const libraryName = "kyverno.json"
+
 type lib struct {
 	json    Json
 	version *version.Version
 }
 
 func Latest() *version.Version {
-	return versions.JsonVersion
+	return versions.KyvernoLatest
 }
 
 func Lib(json JsonIface, v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{
 		json:    Json{json},
@@ -28,7 +33,7 @@ func Lib(json JsonIface, v *version.Version) cel.EnvOption {
 }
 
 func (*lib) LibraryName() string {
-	return "kyverno.json"
+	return libraryName
 }
 
 func (l *lib) CompileOptions() []cel.EnvOption {

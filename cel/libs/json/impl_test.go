@@ -9,7 +9,6 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/ext"
-	"github.com/kyverno/sdk/cel/libs/versions"
 )
 
 type mockJson struct {
@@ -234,7 +233,7 @@ func TestImplMarshal(t *testing.T) {
 
 func TestMarshalCELIntegration(t *testing.T) {
 	env, err := cel.NewEnv(
-		Lib(&JsonImpl{}, versions.JsonVersion),
+		Lib(&JsonImpl{}, Latest()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create CEL environment: %v", err)
