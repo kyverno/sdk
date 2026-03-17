@@ -7,6 +7,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/kyverno/sdk/cel/compiler"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/util/version"
 )
 
 func Test_random(t *testing.T) {
@@ -14,7 +15,7 @@ func Test_random(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		Lib(nil),
+		Lib(version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -22,7 +23,7 @@ func Test_random(t *testing.T) {
 
 	t.Run("random_string", func(t *testing.T) {
 		pattern := "[A-Z0-9]{8}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{12}"
-		ast, issues := env.Compile(`random("` + pattern + `")`)
+		ast, issues := env.Compile(`random.random("` + pattern + `")`)
 		assert.Nil(t, issues)
 		assert.NotNil(t, ast)
 		prog, err := env.Program(ast)
@@ -44,7 +45,7 @@ func Test_random_no_param(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		Lib(nil),
+		Lib(version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -52,7 +53,7 @@ func Test_random_no_param(t *testing.T) {
 
 	t.Run("random_string_no_parameter", func(t *testing.T) {
 		defaultPattern := "[0-9a-z]{8}"
-		ast, issues := env.Compile(`random()`)
+		ast, issues := env.Compile(`random.random()`)
 		assert.Nil(t, issues)
 		assert.NotNil(t, ast)
 		prog, err := env.Program(ast)
