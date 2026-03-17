@@ -37,7 +37,7 @@ func Test_decode(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
 
-	env, err = env.Extend(Lib(nil))
+	env, err = env.Extend(Lib(Latest()))
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
 
