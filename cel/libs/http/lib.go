@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/google/cel-go/cel"
@@ -18,10 +19,13 @@ type lib struct {
 }
 
 func Latest() *version.Version {
-	return versions.HttpVersion
+	return versions.KyvernoLatest
 }
 
 func Lib(httpCtx ContextInterface, v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{httpIface: httpCtx, version: v})
 }
@@ -52,44 +56,62 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 	impl := impl{
 		Adapter: env.CELTypeAdapter(),
 	}
-	// build our function overloads
-	libraryDecls := map[string][]cel.FunctionOpt{
-		"Get": {
+
+	buildGetOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"http_get_string",
+				fmt.Sprintf("http_get_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType},
 				types.AnyType,
 				cel.BinaryBinding(impl.get_request_string),
 			),
 			cel.MemberOverload(
-				"http_get_string_headers",
+				fmt.Sprintf("http_get_string_headers_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.NewMapType(types.StringType, types.StringType)},
 				types.AnyType,
 				cel.FunctionBinding(impl.get_request_with_headers_string),
 			),
-		},
-		"Post": {
+		}
+	}
+
+	buildPostOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"http_post_string_any",
+				fmt.Sprintf("http_post_string_any_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.AnyType},
 				types.AnyType,
 				cel.FunctionBinding(impl.post_request_string),
 			),
 			cel.MemberOverload(
-				"http_post_string_any_headers",
+				fmt.Sprintf("http_post_string_any_headers_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.AnyType, types.NewMapType(types.StringType, types.StringType)},
 				types.AnyType,
 				cel.FunctionBinding(impl.post_request_with_headers_string),
 			),
-		},
-		"Client": {
+		}
+	}
+
+	buildClientOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"http_client_string",
+				fmt.Sprintf("http_client_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType},
 				ContextType,
 				cel.BinaryBinding(impl.http_client_string),
 			),
-		},
+		}
+	}
+	// build our function overloads
+	libraryDecls := map[string][]cel.FunctionOpt{
+		"Get":    buildGetOverloads("pascal"),
+		"Post":   buildPostOverloads("pascal"),
+		"Client": buildClientOverloads("pascal"),
+	}
+
+	if c.version.AtLeast(version.MajorMinor(1, 18)) {
+		libraryDecls["get"] = buildGetOverloads("camel")
+		libraryDecls["post"] = buildPostOverloads("camel")
+		libraryDecls["client"] = buildClientOverloads("camel")
 	}
 	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}

@@ -13,6 +13,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/cel/compiler"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/util/version"
 )
 
 var pemExample = `-----BEGIN CERTIFICATE-----
@@ -54,12 +55,13 @@ func Test_impl_get_request(t *testing.T) {
 		},
 	}}
 
+	// lowercase functions have been introduced since version 2.0 of the library
 	env, err := base.Extend(
-		Lib(&ctx, nil),
+		Lib(&ctx, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Get("http://localhost:8080")`)
+	ast, issues := env.Compile(`http.get("http://localhost:8080")`)
 	fmt.Println(issues.String())
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
@@ -102,11 +104,11 @@ func Test_impl_get_request_with_headers(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, nil),
+		Lib(&ctx, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Get("http://localhost:8080", {"Authorization": "Bearer token"})`)
+	ast, issues := env.Compile(`http.get("http://localhost:8080", {"Authorization": "Bearer token"})`)
 	fmt.Println(issues.String())
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
@@ -138,7 +140,7 @@ func Test_impl_get_request_with_client_string_error(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -195,11 +197,11 @@ func Test_impl_post_request(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, nil),
+		Lib(&ctx, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Post("http://localhost:8080", { "key": dyn("value"), "foo": dyn(2) })`)
+	ast, issues := env.Compile(`http.post("http://localhost:8080", { "key": dyn("value"), "foo": dyn(2) })`)
 	fmt.Println(issues.String())
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
@@ -237,11 +239,11 @@ func Test_impl_post_request_with_headers(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, nil),
+		Lib(&ctx, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Post("http://localhost:8080", {"key": "value"}, {"Authorization": "Bearer token"})`)
+	ast, issues := env.Compile(`http.post("http://localhost:8080", {"key": "value"}, {"Authorization": "Bearer token"})`)
 	fmt.Println(issues.String())
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
@@ -262,7 +264,7 @@ func Test_impl_post_request_string_with_client_error(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -309,11 +311,11 @@ func Test_impl_http_client_string(t *testing.T) {
 
 	env, err := base.Extend(
 		cel.Variable("pem", types.StringType),
-		Lib(&ctx, nil),
+		Lib(&ctx, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Client(pem)`)
+	ast, issues := env.Compile(`http.client(pem)`)
 	fmt.Println(issues.String())
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
@@ -335,7 +337,7 @@ func Test_impl_http_client_string_error(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -367,12 +369,12 @@ func Test_impl_get_request_with_404_status_code(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Get("http://localhost:8080/notfound")`)
+	ast, issues := env.Compile(`http.get("http://localhost:8080/notfound")`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -402,12 +404,12 @@ func Test_impl_get_request_with_500_status_code(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Get("http://localhost:8080/error")`)
+	ast, issues := env.Compile(`http.get("http://localhost:8080/error")`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -437,12 +439,12 @@ func Test_impl_post_request_with_201_status_code(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Post("http://localhost:8080", {"key": "value"})`)
+	ast, issues := env.Compile(`http.post("http://localhost:8080", {"key": "value"})`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -472,12 +474,12 @@ func Test_impl_get_request_with_non_json_body(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Get("http://localhost:8080/text")`)
+	ast, issues := env.Compile(`http.get("http://localhost:8080/text")`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -508,12 +510,12 @@ func Test_impl_get_request_with_array_response(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Get("http://localhost:8080/array")`)
+	ast, issues := env.Compile(`http.get("http://localhost:8080/array")`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -546,12 +548,12 @@ func Test_impl_post_request_with_400_bad_request(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`http.Post("http://localhost:8080", {"invalid": "data"})`)
+	ast, issues := env.Compile(`http.post("http://localhost:8080", {"invalid": "data"})`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
