@@ -1,6 +1,7 @@
 package user
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/google/cel-go/cel"
@@ -17,10 +18,13 @@ type lib struct {
 }
 
 func Latest() *version.Version {
-	return versions.UserVersion
+	return versions.KyvernoLatest
 }
 
 func Lib(v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{version: v})
 }
@@ -44,21 +48,23 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 	impl := impl{
 		Adapter: env.CELTypeAdapter(),
 	}
-	// build our function overloads
-	libraryDecls := map[string][]cel.FunctionOpt{
-		"parseServiceAccount": {
-			cel.Overload(
-				"parse_service_account_string",
-				[]*cel.Type{types.StringType},
-				ServiceAccountType,
-				cel.UnaryBinding(impl.parse_service_account_string),
-			),
-		},
+
+	buildParseServiceAccountOverload := func(suffix string) cel.FunctionOpt {
+		return cel.Overload(
+			fmt.Sprintf("parse_service_account_string_%s", suffix),
+			[]*cel.Type{types.StringType},
+			ServiceAccountType,
+			cel.UnaryBinding(impl.parse_service_account_string),
+		)
 	}
-	// create env options corresponding to our function overloads
-	options := []cel.EnvOption{}
-	for name, overloads := range libraryDecls {
-		options = append(options, cel.Function(name, overloads...))
+	// build our function overloads
+	options := []cel.EnvOption{
+		cel.Function("parseServiceAccount", buildParseServiceAccountOverload("non_prefixed")),
+	}
+	if c.version.AtLeast(version.MajorMinor(1, 18)) {
+		options = append(options,
+			cel.Function("user.parseServiceAccount", buildParseServiceAccountOverload("prefixed")),
+		)
 	}
 	// extend environment with our function overloads
 	return env.Extend(options...)

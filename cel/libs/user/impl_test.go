@@ -36,7 +36,7 @@ func Test_impl_parse_service_account_string(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotNil(t, base)
 			options := []cel.EnvOption{
-				Lib(nil),
+				Lib(Latest()),
 			}
 			env, err := base.Extend(options...)
 			assert.NoError(t, err)
