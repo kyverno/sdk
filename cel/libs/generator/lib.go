@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/google/cel-go/cel"
@@ -18,12 +19,15 @@ type lib struct {
 }
 
 func Lib(generatorCtx ContextInterface, v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{generatorIface: generatorCtx, version: v})
 }
 
 func Latest() *version.Version {
-	return versions.GeneratorVersion
+	return versions.KyvernoLatest
 }
 
 func (*lib) LibraryName() string {
@@ -52,16 +56,23 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 	impl := impl{
 		Adapter: env.CELTypeAdapter(),
 	}
-	// build our function overloads
-	libraryDecls := map[string][]cel.FunctionOpt{
-		"Apply": {
+
+	buildApplyOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"generator_apply_string_list",
+				fmt.Sprintf("generator_apply_string_list_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.NewListType(types.NewMapType(types.StringType, types.AnyType))},
 				types.BoolType,
 				cel.FunctionBinding(impl.apply_generator_string_list),
 			),
-		},
+		}
+	}
+	// build our function overloads
+	libraryDecls := map[string][]cel.FunctionOpt{
+		"Apply": buildApplyOverloads("pascal"),
+	}
+	if c.version.AtLeast(version.MajorMinor(1, 18)) {
+		libraryDecls["apply"] = buildApplyOverloads("camel")
 	}
 	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}

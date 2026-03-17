@@ -7,6 +7,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/cel/compiler"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/util/version"
 )
 
 func Test_apply_generator_string_list(t *testing.T) {
@@ -27,12 +28,12 @@ func Test_apply_generator_string_list(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, nil),
+		Lib(&ctx, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
 	ast, issues := env.Compile(`
-generator.Apply(
+generator.apply(
 	"default",
 	[
 		{
@@ -61,7 +62,7 @@ func Test_apply_generator_string_list_error(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, nil),
+		Lib(nil, Latest()),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
