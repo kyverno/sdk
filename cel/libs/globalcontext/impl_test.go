@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/structpb"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/version"
 )
 
 func Test_impl_get_string(t *testing.T) {
@@ -60,13 +61,13 @@ func Test_impl_get_string(t *testing.T) {
 			}}
 
 			options := []cel.EnvOption{
-				Lib(ctx, nil),
+				Lib(ctx, version.MajorMinor(1, 18)),
 			}
 			env, err := base.Extend(options...)
 			assert.NoError(t, err)
 			assert.NotNil(t, env)
 
-			ast, issues := env.Compile(`globalContext.Get("foo")`)
+			ast, issues := env.Compile(`globalContext.get("foo")`)
 			assert.Nil(t, issues)
 			assert.NotNil(t, ast)
 			prog, err := env.Program(ast)
@@ -141,12 +142,12 @@ func Test_impl_get_string_string(t *testing.T) {
 				},
 			}}
 			options := []cel.EnvOption{
-				Lib(ctx, nil),
+				Lib(ctx, version.MajorMinor(1, 18)),
 			}
 			env, err := base.Extend(options...)
 			assert.NoError(t, err)
 			assert.NotNil(t, env)
-			ast, issues := env.Compile(`globalContext.Get("foo", "bar")`)
+			ast, issues := env.Compile(`globalContext.get("foo", "bar")`)
 			assert.Nil(t, issues)
 			assert.NotNil(t, ast)
 			prog, err := env.Program(ast)
@@ -180,7 +181,7 @@ func Test_impl_get_string_error(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -212,7 +213,7 @@ func Test_impl_get_string_string_error(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		Lib(nil, nil),
+		Lib(nil, version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)

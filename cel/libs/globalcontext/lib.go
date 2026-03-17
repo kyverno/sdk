@@ -1,6 +1,7 @@
 package globalcontext
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/google/cel-go/cel"
@@ -18,12 +19,15 @@ type lib struct {
 }
 
 func Lib(globalcontextCtx ContextInterface, v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{globalcontextIface: globalcontextCtx, version: v})
 }
 
 func Latest() *version.Version {
-	return versions.GlobalContextVersion
+	return versions.KyvernoLatest
 }
 
 func (*lib) LibraryName() string {
@@ -52,22 +56,28 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 	impl := impl{
 		Adapter: env.CELTypeAdapter(),
 	}
-	// build our function overloads
-	libraryDecls := map[string][]cel.FunctionOpt{
-		"Get": {
+	buildGetOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"globalcontext_get_string",
+				fmt.Sprintf("globalcontext_get_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType},
 				types.DynType,
 				cel.BinaryBinding(impl.get_string),
 			),
 			cel.MemberOverload(
-				"globalcontext_get_string_string",
+				fmt.Sprintf("globalcontext_get_string_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType},
 				types.DynType,
 				cel.FunctionBinding(impl.get_string_string),
 			),
-		},
+		}
+	}
+	// build our function overloads
+	libraryDecls := map[string][]cel.FunctionOpt{
+		"Get": buildGetOverloads("pascal"),
+	}
+	if c.version.AtLeast(version.MajorMinor(1, 18)) {
+		libraryDecls["get"] = buildGetOverloads("camel")
 	}
 	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}
