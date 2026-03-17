@@ -14,7 +14,7 @@ func Test_time_now(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		Lib(nil),
+		Lib(Latest()),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -38,7 +38,7 @@ func Test_time_truncate(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		Lib(nil),
+		Lib(Latest()),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -75,7 +75,7 @@ func Test_time_toCron(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		Lib(nil),
+		Lib(Latest()),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)

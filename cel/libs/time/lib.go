@@ -19,12 +19,15 @@ type lib struct {
 }
 
 func Lib(v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{version: v})
 }
 
 func Latest() *version.Version {
-	return versions.TimeVersion
+	return versions.KyvernoLatest
 }
 
 func (*lib) LibraryName() string {
