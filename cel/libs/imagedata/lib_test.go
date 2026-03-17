@@ -13,7 +13,7 @@ func TestLib(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, nil),
+		Lib(nil, Latest()),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)

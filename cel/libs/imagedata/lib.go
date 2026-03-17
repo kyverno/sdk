@@ -1,6 +1,7 @@
 package imagedata
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/google/cel-go/cel"
@@ -18,12 +19,15 @@ type lib struct {
 }
 
 func Lib(imagedataCtx ContextInterface, v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{imagedataIface: imagedataCtx, version: v})
 }
 
 func Latest() *version.Version {
-	return versions.ImageDataVersion
+	return versions.KyvernoLatest
 }
 
 func (*lib) LibraryName() string {
@@ -52,16 +56,22 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 	impl := impl{
 		Adapter: env.CELTypeAdapter(),
 	}
-	// build our function overloads
-	libraryDecls := map[string][]cel.FunctionOpt{
-		"GetMetadata": {
+	buildGetMetadataOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"imagedata_get_string",
+				fmt.Sprintf("imagedata_get_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType},
 				types.DynType,
 				cel.FunctionBinding(impl.get_imagedata_string),
 			),
-		},
+		}
+	}
+	// build our function overloads
+	libraryDecls := map[string][]cel.FunctionOpt{
+		"GetMetadata": buildGetMetadataOverloads("pascal"),
+	}
+	if c.version.AtLeast(version.MajorMinor(1, 18)) {
+		libraryDecls["getMetadata"] = buildGetMetadataOverloads("camel")
 	}
 	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}

@@ -8,6 +8,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/cel/compiler"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/util/version"
 )
 
 func Test_impl_get_imagedata_string(t *testing.T) {
@@ -24,11 +25,11 @@ func Test_impl_get_imagedata_string(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, nil),
+		Lib(&ctx, version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`image.GetMetadata("ghcr.io/kyverno/kyverno:latest").resolvedImage`)
+	ast, issues := env.Compile(`image.getMetadata("ghcr.io/kyverno/kyverno:latest").resolvedImage`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -47,7 +48,7 @@ func Test_impl_get_imagedata_string_error(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, nil),
+		Lib(nil, Latest()),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
