@@ -10,16 +10,21 @@ import (
 	"k8s.io/apimachinery/pkg/util/version"
 )
 
+const libraryName = "kyverno.yaml"
+
 type lib struct {
 	yaml    Yaml
 	version *version.Version
 }
 
 func Latest() *version.Version {
-	return versions.YamlVersion
+	return versions.KyvernoLatest
 }
 
 func Lib(yaml YamlIface, v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{
 		yaml:    Yaml{yaml},
@@ -28,7 +33,7 @@ func Lib(yaml YamlIface, v *version.Version) cel.EnvOption {
 }
 
 func (*lib) LibraryName() string {
-	return "kyverno.yaml"
+	return libraryName
 }
 
 func (l *lib) CompileOptions() []cel.EnvOption {
