@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/google/cel-go/cel"
@@ -19,10 +20,13 @@ type lib struct {
 }
 
 func Latest() *version.Version {
-	return versions.ResourceVersion
+	return versions.KyvernoLatest
 }
 
 func Lib(resourceCtx ContextInterface, namespace string, v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	// create the cel lib env option
 	return cel.Lib(&lib{resourceIface: resourceCtx, namespace: namespace, version: v})
 }
@@ -62,64 +66,82 @@ func (l *lib) namespacedEnv(env *cel.Env) (*cel.Env, error) {
 		namespace: l.namespace,
 		Adapter:   env.CELTypeAdapter(),
 	}
-	// build our function overloads
-	libraryDecls := map[string][]cel.FunctionOpt{
-		"List": {
+	buildlistOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"resource_list_string_string",
+				fmt.Sprintf("resource_list_string_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.list_resources_string_string),
 			),
 			cel.MemberOverload(
-				"resource_list_string_string_map",
+				fmt.Sprintf("resource_list_string_string_map_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType, types.NewMapType(types.StringType, types.StringType)},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.list_resources_string_string_map),
 			),
 			cel.MemberOverload(
-				"list_resources_gvr",
+				fmt.Sprintf("list_resources_gvr_%s", suffix),
 				[]*cel.Type{ContextType, GVRType},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.list_resources_gvr),
 			),
 			cel.MemberOverload(
-				"list_resources_gvr_map",
+				fmt.Sprintf("list_resources_gvr_map_%s", suffix),
 				[]*cel.Type{ContextType, GVRType, types.NewMapType(types.StringType, types.StringType)},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.list_resources_gvr_map),
 			),
-		},
-		"Get": {
+		}
+	}
+	buildGetOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"resource_get_string_string_string",
+				fmt.Sprintf("resource_get_string_string_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType, types.StringType},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.get_resource_string_string_string),
 			),
 			cel.MemberOverload(
-				"resource_get_gvr_string",
+				fmt.Sprintf("resource_get_gvr_string_%s", suffix),
 				[]*cel.Type{ContextType, GVRType, types.StringType},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.get_resources_gvr_string),
 			),
-		},
-		"Post": {
+		}
+	}
+	buildPostOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"resource_post_string_string_map",
+				fmt.Sprintf("resource_post_string_string_map_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType, types.NewMapType(types.StringType, types.AnyType)},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.post_resource_string_string_map),
 			),
-		},
-		"ToGVR": {
+		}
+	}
+	buildToGVROverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"convert_to_gvr_string_string",
+				fmt.Sprintf("convert_to_gvr_string_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType},
 				GVRType,
 				cel.FunctionBinding(impl.convert_to_gvr_string_string),
 			),
-		},
+		}
+	}
+	// build our function overloads
+	libraryDecls := map[string][]cel.FunctionOpt{
+		"List":  buildlistOverloads("pascal"),
+		"Get":   buildGetOverloads("pascal"),
+		"Post":  buildPostOverloads("pascal"),
+		"ToGVR": buildToGVROverloads("pascal"),
+	}
+	if l.version.AtLeast(version.MajorMinor(1, 18)) {
+		libraryDecls["list"] = buildlistOverloads("camel")
+		libraryDecls["get"] = buildGetOverloads("camel")
+		libraryDecls["post"] = buildPostOverloads("camel")
+		libraryDecls["toGVR"] = buildToGVROverloads("camel")
 	}
 	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}
@@ -134,70 +156,88 @@ func (l *lib) clusterEnv(env *cel.Env) (*cel.Env, error) {
 	impl := impl{
 		Adapter: env.CELTypeAdapter(),
 	}
-	// build our function overloads
-	libraryDecls := map[string][]cel.FunctionOpt{
-		"List": {
+	buildListOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"resource_list_string_string_string",
+				fmt.Sprintf("resource_list_string_string_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType, types.StringType},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.list_resources_string_string_string),
 			),
 			cel.MemberOverload(
-				"resource_list_string_string_string_map",
+				fmt.Sprintf("resource_list_string_string_string_map_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType, types.StringType, types.NewMapType(types.StringType, types.StringType)},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.list_resources_string_string_string_map),
 			),
 			cel.MemberOverload(
-				"list_resources_gvr_string",
+				fmt.Sprintf("list_resources_gvr_string_%s", suffix),
 				[]*cel.Type{ContextType, GVRType, types.StringType},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.list_resources_gvr_string),
 			),
 			cel.MemberOverload(
-				"list_resources_gvr_string_map",
+				fmt.Sprintf("list_resources_gvr_string_map_%s", suffix),
 				[]*cel.Type{ContextType, GVRType, types.StringType, types.NewMapType(types.StringType, types.StringType)},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.list_resources_gvr_string_map),
 			),
-		},
-		"Get": {
+		}
+	}
+	buildGetOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"resource_get_string_string_string_string",
+				fmt.Sprintf("resource_get_string_string_string_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType, types.StringType, types.StringType},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.get_resource_string_string_string_string),
 			),
 			cel.MemberOverload(
-				"resource_get_gvr_string_string",
+				fmt.Sprintf("resource_get_gvr_string_string_%s", suffix),
 				[]*cel.Type{ContextType, GVRType, types.StringType, types.StringType},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.get_resources_gvr_string_string),
 			),
-		},
-		"Post": {
+		}
+	}
+	buildPostOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"resource_post_string_string_string_map",
+				fmt.Sprintf("resource_post_string_string_string_map_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType, types.StringType, types.NewMapType(types.StringType, types.AnyType)},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.post_resource_string_string_string_map),
 			),
 			cel.MemberOverload(
-				"resource_post_string_string_map",
+				fmt.Sprintf("resource_post_string_string_map_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType, types.NewMapType(types.StringType, types.AnyType)},
 				types.NewMapType(types.StringType, types.AnyType),
 				cel.FunctionBinding(impl.post_resource_string_string_map),
 			),
-		},
-		"ToGVR": {
+		}
+	}
+	buildToGVROverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
 			cel.MemberOverload(
-				"convert_to_gvr_string_string",
+				fmt.Sprintf("convert_to_gvr_string_string_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.StringType},
 				GVRType,
 				cel.FunctionBinding(impl.convert_to_gvr_string_string),
 			),
-		},
+		}
+	}
+	// build our function overloads
+	libraryDecls := map[string][]cel.FunctionOpt{
+		"List":  buildListOverloads("pascal"),
+		"Get":   buildGetOverloads("pascal"),
+		"Post":  buildPostOverloads("pascal"),
+		"ToGVR": buildToGVROverloads("pascal"),
+	}
+	if l.version.AtLeast(version.MajorMinor(1, 18)) {
+		libraryDecls["list"] = buildListOverloads("camel")
+		libraryDecls["get"] = buildGetOverloads("camel")
+		libraryDecls["post"] = buildPostOverloads("camel")
+		libraryDecls["toGVR"] = buildToGVROverloads("camel")
 	}
 	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}

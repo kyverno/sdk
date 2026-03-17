@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/version"
 )
 
 func Test_impl_get_resource_string_string_string_string(t *testing.T) {
@@ -37,11 +38,11 @@ func Test_impl_get_resource_string_string_string_string(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", nil),
+		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`resource.Get("apps/v1", "deployments", "default", "nginx")`)
+	ast, issues := env.Compile(`resource.get("apps/v1", "deployments", "default", "nginx")`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -60,7 +61,7 @@ func Test_impl_get_resource_string_string_string_string_error(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	env, err := base.Extend(
-		Lib(nil, "default", nil),
+		Lib(nil, "default", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -129,11 +130,11 @@ func Test_impl_list_resources_string_string_string(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", nil),
+		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`resource.List("apps/v1", "deployments", "default")`)
+	ast, issues := env.Compile(`resource.list("apps/v1", "deployments", "default")`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -177,11 +178,11 @@ func Test_impl_list_resources_string_string_string_map(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", nil),
+		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`resource.List("apps/v1", "deployments", "default", {"app": "nginx"})`)
+	ast, issues := env.Compile(`resource.list("apps/v1", "deployments", "default", {"app": "nginx"})`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -201,7 +202,7 @@ func Test_impl_list_resources_string_string_string_error(t *testing.T) {
 	assert.NotNil(t, base)
 	env, err := base.Extend(
 		cel.Variable("resource", ContextType),
-		Lib(nil, "default", nil),
+		Lib(nil, "default", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -259,12 +260,12 @@ func Test_post_resource_string_string_string_map(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", nil),
+		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
 	ast, issues := env.Compile(`
-resource.Post(
+resource.post(
 	"apps/v1",
 	"deployments",
 	"default",
@@ -298,7 +299,7 @@ func Test_impl_post_resource_string_string_string_map_error(t *testing.T) {
 	assert.NotNil(t, base)
 	env, err := base.Extend(
 		cel.Variable("resource", ContextType),
-		Lib(nil, "default", nil),
+		Lib(nil, "default", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -346,7 +347,7 @@ func Test_impl_post_resource_string_string_map_error(t *testing.T) {
 	assert.NotNil(t, base)
 	env, err := base.Extend(
 		cel.Variable("resource", ContextType),
-		Lib(nil, "default", nil),
+		Lib(nil, "default", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -386,11 +387,11 @@ func Test_impl_list_resources_forbidden_error(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", nil),
+		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`resource.List("apps/v1", "deployments", "default")`)
+	ast, issues := env.Compile(`resource.list("apps/v1", "deployments", "default")`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -420,11 +421,11 @@ func Test_impl_get_resource_forbidden_error(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", nil),
+		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`resource.Get("apps/v1", "deployments", "default", "nginx")`)
+	ast, issues := env.Compile(`resource.get("apps/v1", "deployments", "default", "nginx")`)
 	assert.Nil(t, issues)
 	assert.NotNil(t, ast)
 	prog, err := env.Program(ast)
@@ -454,12 +455,12 @@ func Test_impl_post_resource_forbidden_error(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", nil),
+		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
 	ast, issues := env.Compile(`
-resource.Post(
+resource.post(
 	"apps/v1",
 	"deployments",
 	"default",
