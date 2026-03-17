@@ -6,6 +6,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/kyverno/sdk/cel/compiler"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/util/version"
 )
 
 func Test_hashing(t *testing.T) {
@@ -13,14 +14,14 @@ func Test_hashing(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		Lib(nil),
+		Lib(version.MajorMinor(1, 18)),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
 
 	t.Run("sha1_string", func(t *testing.T) {
-		ast, issues := env.Compile(`sha1("ghcr.io/kyverno/kyverno:latest")`)
+		ast, issues := env.Compile(`hash.sha1("ghcr.io/kyverno/kyverno:latest")`)
 		assert.Nil(t, issues)
 		assert.NotNil(t, ast)
 		prog, err := env.Program(ast)
@@ -33,7 +34,7 @@ func Test_hashing(t *testing.T) {
 	})
 
 	t.Run("sha256_string", func(t *testing.T) {
-		ast, issues := env.Compile(`sha256("ghcr.io/kyverno/kyverno:latest")`)
+		ast, issues := env.Compile(`hash.sha256("ghcr.io/kyverno/kyverno:latest")`)
 		assert.Nil(t, issues)
 		assert.NotNil(t, ast)
 		prog, err := env.Program(ast)
@@ -46,7 +47,7 @@ func Test_hashing(t *testing.T) {
 	})
 
 	t.Run("md5_string", func(t *testing.T) {
-		ast, issues := env.Compile(`md5("ghcr.io/kyverno/kyverno:latest")`)
+		ast, issues := env.Compile(`hash.md5("ghcr.io/kyverno/kyverno:latest")`)
 		assert.Nil(t, issues)
 		assert.NotNil(t, ast)
 		prog, err := env.Program(ast)
