@@ -9,11 +9,14 @@ import (
 const libraryName = "kyverno.image"
 
 func Lib(v *version.Version) cel.EnvOption {
+	if v == nil {
+		panic(libraryName + ": library version must not be nil")
+	}
 	return cel.Lib(&imageLibType{version: v})
 }
 
 func Latest() *version.Version {
-	return versions.ImageVersion
+	return versions.KyvernoLatest
 }
 
 type imageLibType struct {

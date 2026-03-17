@@ -20,7 +20,7 @@ func testImageLib(t *testing.T, expr string, expectResult ref.Val, expectRuntime
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
-		image.Lib(nil),
+		image.Lib(image.Latest()),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
