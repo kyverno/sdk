@@ -44,8 +44,8 @@ func (i *impl) compress(value ref.Val) ref.Val {
 		if err != nil {
 			return types.WrapErr(err)
 		}
+		defer w.Close()
 
-		w.Close()
 		return i.NativeToValue(buf.Bytes())
 	}
 }
