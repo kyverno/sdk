@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"time"
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -39,9 +40,14 @@ func (i *impl) compress(value ref.Val) ref.Val {
 	} else {
 		var buf bytes.Buffer
 		w := gzip.NewWriter(&buf)
-		defer w.Close() //nolint:errcheck
+		w.Header.ModTime = time.Unix(0, 0) // to make compression deterministic
 
 		_, err = w.Write([]byte(native))
+		if err != nil {
+			return types.WrapErr(err)
+		}
+
+		err = w.Close()
 		if err != nil {
 			return types.WrapErr(err)
 		}
