@@ -40,7 +40,7 @@ func (i *impl) compress(value ref.Val) ref.Val {
 	} else {
 		var buf bytes.Buffer
 		w := gzip.NewWriter(&buf)
-		w.Header.ModTime = time.Unix(0, 0) // to make compression deterministic
+		w.ModTime = time.Unix(0, 0) // to make compression deterministic
 
 		_, err = w.Write([]byte(native))
 		if err != nil {
