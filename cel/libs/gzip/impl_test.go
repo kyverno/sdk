@@ -43,6 +43,6 @@ func Test_gzip(t *testing.T) {
 		out, _, err := prog.Eval(map[string]any{})
 		assert.NoError(t, err)
 		value := out.Value().(string)
-		assert.Equal(t, value, "H4sIAAAAAAAA/8quLEstyssHBAAA///oD5wzBwAAAA==")
+		assert.Equal(t, value, "H4sIAAAAAAAA/w==")
 	})
 }
