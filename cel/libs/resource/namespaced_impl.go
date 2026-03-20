@@ -5,7 +5,6 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/cel/utils"
 	"google.golang.org/protobuf/types/known/structpb"
-	"k8s.io/apimachinery/pkg/api/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -98,7 +97,7 @@ func (c *namespacedImpl) get_resource_string_string_string(args ...ref.Val) ref.
 	} else {
 		res, err := self.GetResource(apiVersion, resource, c.namespace, name)
 		if err != nil {
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				return c.NativeToValue(res.UnstructuredContent())
 			}
 			if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {

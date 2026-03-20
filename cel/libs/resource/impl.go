@@ -5,7 +5,6 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/cel/utils"
 	"google.golang.org/protobuf/types/known/structpb"
-	"k8s.io/apimachinery/pkg/api/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -103,8 +102,8 @@ func (c *impl) get_resource_string_string_string_string(args ...ref.Val) ref.Val
 	} else {
 		res, err := self.GetResource(apiVersion, resource, namespace, name)
 		if err != nil {
-			if errors.IsNotFound(err) {
-				return c.NativeToValue(res.UnstructuredContent())
+			if apierrors.IsNotFound(err) {
+				return types.NullValue
 			}
 			if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
 				return types.NewErr("failed to get resource: permission denied: %v", err)
