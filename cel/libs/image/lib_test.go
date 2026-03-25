@@ -187,6 +187,11 @@ func TestImage(t *testing.T) {
 			expectValue: types.String("testtag"),
 		},
 		{
+			name:        "tag_with_digest",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64:testtag@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2").tag()`,
+			expectValue: types.String("testtag"),
+		},
+		{
 			name:        "default_tag",
 			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64").tag()`,
 			expectValue: types.String("latest"),
