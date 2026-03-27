@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -44,16 +45,14 @@ func Test_impl_get_request(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 
-	ctx := Context{&contextImpl{
-		client: testClient{
-			doFunc: func(req *http.Request) (*http.Response, error) {
-				assert.Equal(t, req.URL.String(), "http://localhost:8080")
-				assert.Equal(t, req.Method, "GET")
+	ctx := Context{ContextInterface: NewHTTP(testClient{
+		doFunc: func(req *http.Request) (*http.Response, error) {
+			assert.Equal(t, req.URL.String(), "http://localhost:8080")
+			assert.Equal(t, req.Method, "GET")
 
-				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
-			},
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
 		},
-	}}
+	}, 10*time.Second, 1000000)}
 
 	// lowercase functions have been introduced since version 2.0 of the library
 	env, err := base.Extend(
@@ -78,6 +77,7 @@ func Test_impl_get_request(t *testing.T) {
 					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
 				},
 			},
+			maxBodySize: 1000000,
 		}},
 	})
 	assert.NoError(t, err)
@@ -101,6 +101,7 @@ func Test_impl_get_request_with_headers(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
 			},
 		},
+		maxBodySize: 1000000,
 	}}
 
 	env, err := base.Extend(
@@ -126,6 +127,7 @@ func Test_impl_get_request_with_headers(t *testing.T) {
 					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
 				},
 			},
+			maxBodySize: 1000000,
 		}},
 	})
 	assert.NoError(t, err)
@@ -194,6 +196,7 @@ func Test_impl_post_request(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
 			},
 		},
+		maxBodySize: 1000000,
 	}}
 
 	env, err := base.Extend(
@@ -236,6 +239,7 @@ func Test_impl_post_request_with_headers(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
 			},
 		},
+		maxBodySize: 1000000,
 	}}
 
 	env, err := base.Extend(
@@ -390,6 +394,7 @@ func Test_impl_get_request_with_404_status_code(t *testing.T) {
 					}, nil
 				},
 			},
+			maxBodySize: 1000000,
 		}},
 	})
 	assert.NoError(t, err)

@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"time"
 )
 
 type ClientInterface interface {
@@ -16,15 +18,19 @@ type ClientInterface interface {
 }
 
 type contextImpl struct {
-	client ClientInterface
+	client      ClientInterface
+	timeout     time.Duration
+	maxBodySize int64
 }
 
-func NewHTTP(client ClientInterface) ContextInterface {
+func NewHTTP(client ClientInterface, timeout time.Duration, maxBodySize int64) ContextInterface {
 	if client == nil {
-		client = http.DefaultClient
+		client = newClient(nil, timeout)
 	}
 	return &contextImpl{
-		client: client,
+		client:      client,
+		timeout:     timeout,
+		maxBodySize: maxBodySize,
 	}
 }
 
@@ -62,8 +68,17 @@ func (r *contextImpl) executeRequest(client ClientInterface, req *http.Request) 
 	defer func() { _ = resp.Body.Close() }()
 
 	var body any
+
 	if resp.Body != nil {
+		if resp.ContentLength != 0 {
+			var w http.ResponseWriter
+			resp.Body = http.MaxBytesReader(w, resp.Body, r.maxBodySize)
+		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			if _, ok := err.(*http.MaxBytesError); ok {
+				return nil, fmt.Errorf("response length must be less than max allowed response length of %d", r.maxBodySize)
+			}
+
 			body = nil
 		}
 	}
@@ -88,12 +103,7 @@ func (r *contextImpl) Client(caBundle string) (ContextInterface, error) {
 		return nil, fmt.Errorf("failed to parse PEM CA bundle for APICall")
 	}
 	return &contextImpl{
-		client: &http.Client{Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs:    caCertPool,
-				MinVersion: tls.VersionTLS12,
-			},
-		}},
+		client: newClient(caCertPool, r.timeout),
 	}, nil
 }
 
@@ -103,4 +113,25 @@ func buildRequestData(data any) (io.Reader, error) {
 		return nil, fmt.Errorf("failed to encode HTTP POST data %v: %w", data, err)
 	}
 	return buffer, nil
+}
+
+func newClient(certPool *x509.CertPool, timeout time.Duration) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 60 * time.Second,
+			}).DialContext,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			Proxy:                 http.ProxyFromEnvironment,
+			TLSClientConfig: &tls.Config{
+				RootCAs:    certPool,
+				MinVersion: tls.VersionTLS12,
+			},
+		},
+		Timeout: timeout,
+	}
 }
