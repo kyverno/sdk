@@ -77,6 +77,7 @@ func Test_impl_get_request(t *testing.T) {
 					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
 				},
 			},
+			maxBodySize: 1000000,
 		}},
 	})
 	assert.NoError(t, err)
@@ -126,6 +127,7 @@ func Test_impl_get_request_with_headers(t *testing.T) {
 					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "ok"}`))}, nil
 				},
 			},
+			maxBodySize: 1000000,
 		}},
 	})
 	assert.NoError(t, err)
@@ -392,6 +394,7 @@ func Test_impl_get_request_with_404_status_code(t *testing.T) {
 					}, nil
 				},
 			},
+			maxBodySize: 1000000,
 		}},
 	})
 	assert.NoError(t, err)

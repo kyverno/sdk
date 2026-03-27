@@ -68,15 +68,19 @@ func (r *contextImpl) executeRequest(client ClientInterface, req *http.Request) 
 	defer func() { _ = resp.Body.Close() }()
 
 	var body any
-	var w http.ResponseWriter
 
-	resp.Body = http.MaxBytesReader(w, resp.Body, r.maxBodySize)
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			return nil, fmt.Errorf("response length must be less than max allowed response length of %d", r.maxBodySize)
+	if resp.Body != nil {
+		if resp.ContentLength != 0 {
+			var w http.ResponseWriter
+			resp.Body = http.MaxBytesReader(w, resp.Body, r.maxBodySize)
 		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			if _, ok := err.(*http.MaxBytesError); ok {
+				return nil, fmt.Errorf("response length must be less than max allowed response length of %d", r.maxBodySize)
+			}
 
-		return nil, fmt.Errorf("unable to decode JSON body: %w", err)
+			body = nil
+		}
 	}
 
 	if bodyMap, ok := body.(map[string]any); ok {
