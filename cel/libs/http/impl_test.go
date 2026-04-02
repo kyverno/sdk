@@ -638,6 +638,51 @@ func Test_validateURL_blocked_hostname(t *testing.T) {
 	assert.Contains(t, err.Error(), "blocked")
 }
 
+func Test_validateURL_blocks_hostname_uppercase(t *testing.T) {
+	// Hostname comparisons must be case-insensitive: blocklist entry stored as
+	// lowercase should still block an uppercase request hostname.
+	ctx, err := NewHTTPWithBlocklist(nil, DefaultBlockedHosts, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get("http://METADATA.GOOGLE.INTERNAL/computeMetadata/v1/", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_validateURL_blocks_hostname_trailing_dot(t *testing.T) {
+	// The trailing-dot FQDN form is equivalent to the bare hostname; both must be blocked.
+	ctx, err := NewHTTPWithBlocklist(nil, DefaultBlockedHosts, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get("http://metadata.google.internal./computeMetadata/v1/", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_validateURL_allowlist_matches_explicit_default_port(t *testing.T) {
+	// An allowlist entry without a port must match a request URL that includes
+	// the default port for its scheme (e.g. :443 for https).
+	doFunc := func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok": true}`))}, nil
+	}
+	ctx, err := NewHTTPWithBlocklist(&testClient{doFunc: doFunc}, nil, []string{"https://api.example.com"})
+	assert.NoError(t, err)
+	result, err := ctx.Get("https://api.example.com:443/v1/resource", nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+}
+
+func Test_validateURL_allowlist_matches_implicit_port_from_scheme(t *testing.T) {
+	// A request URL without an explicit port must match an allowlist entry that
+	// includes the default port for the scheme.
+	doFunc := func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok": true}`))}, nil
+	}
+	ctx, err := NewHTTPWithBlocklist(&testClient{doFunc: doFunc}, nil, []string{"https://api.example.com:443"})
+	assert.NoError(t, err)
+	result, err := ctx.Get("https://api.example.com/v1/resource", nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+}
+
 func Test_impl_post_request_with_400_bad_request(t *testing.T) {
 	base, err := compiler.NewBaseEnv()
 	assert.NoError(t, err)

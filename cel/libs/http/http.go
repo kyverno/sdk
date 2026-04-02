@@ -15,6 +15,75 @@ import (
 	"time"
 )
 
+// normalizeHost lowercases a DNS hostname and strips any trailing dot.
+// DNS hostnames are case-insensitive and the trailing-dot (FQDN) form is equivalent.
+func normalizeHost(h string) string {
+	return strings.ToLower(strings.TrimRight(h, "."))
+}
+
+// effectivePort returns the port for a URL, falling back to the scheme's default
+// when the URL omits an explicit port.
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch u.Scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	}
+	return ""
+}
+
+// secureDialContext returns a DialContext function that validates resolved IPs
+// against the given blocked CIDRs before establishing a connection. It resolves
+// the hostname itself and dials the validated IP directly, closing the
+// DNS-rebinding window that arises when validation and dialing use separate
+// DNS lookups.
+func secureDialContext(blockedCIDRs []*net.IPNet) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	base := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		// Literal IP: validate and dial directly.
+		if ip := net.ParseIP(host); ip != nil {
+			for _, cidr := range blockedCIDRs {
+				if cidr.Contains(ip) {
+					return nil, fmt.Errorf("connection to %s blocked: IP %s falls in blocked range %s", addr, ip, cidr)
+				}
+			}
+			return base.DialContext(ctx, network, addr)
+		}
+		// Hostname: resolve, validate each IP, then dial the first valid one
+		// directly to avoid a second DNS lookup (DNS-rebinding prevention).
+		ips, err := net.DefaultResolver.LookupHost(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve %s: %w", host, err)
+		}
+		for _, ipStr := range ips {
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				continue
+			}
+			for _, cidr := range blockedCIDRs {
+				if cidr.Contains(ip) {
+					return nil, fmt.Errorf("connection to %s blocked: resolved IP %s falls in blocked range %s", addr, ip, cidr)
+				}
+			}
+			// Connect directly to the validated IP; pass the original hostname
+			// so that TLS SNI and certificate validation still work.
+			return base.DialContext(ctx, network, net.JoinHostPort(ipStr, port))
+		}
+		return nil, fmt.Errorf("no usable addresses resolved for %s", host)
+	}
+}
+
 // DefaultBlockedCIDRs is the default set of CIDR ranges blocked to prevent SSRF attacks.
 // It covers loopback, link-local (cloud metadata), RFC-1918 private, and shared address space.
 var DefaultBlockedCIDRs = []string{
@@ -78,10 +147,6 @@ func NewHTTPWithDefaultBlocklist(client ClientInterface) ContextInterface {
 // must be identical and the request path must start with the entry's path. The blocklist is
 // still enforced on top of the allowlist for defence in depth.
 func NewHTTPWithBlocklist(client ClientInterface, blocklist, allowlist []string) (ContextInterface, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-
 	var blockedCIDRs []*net.IPNet
 	blockedHosts := make(map[string]struct{})
 	for _, entry := range blocklist {
@@ -96,7 +161,7 @@ func NewHTTPWithBlocklist(client ClientInterface, blocklist, allowlist []string)
 			}
 			blockedCIDRs = append(blockedCIDRs, ipNet)
 		} else {
-			blockedHosts[entry] = struct{}{}
+			blockedHosts[normalizeHost(entry)] = struct{}{}
 		}
 	}
 
@@ -114,6 +179,27 @@ func NewHTTPWithBlocklist(client ClientInterface, blocklist, allowlist []string)
 			return nil, fmt.Errorf("allowlist entry %q must include scheme and host (e.g. https://api.example.com)", entry)
 		}
 		allowedURLPrefixes = append(allowedURLPrefixes, u)
+	}
+
+	// When blocked CIDRs are configured and no custom client was supplied, use a
+	// client whose DialContext enforces CIDR checks at connection time. This
+	// closes the DNS-rebinding window that exists when validateURL resolves a
+	// hostname and the http.Client later re-resolves it to a different IP.
+	if client == nil {
+		if len(blockedCIDRs) > 0 {
+			client = &http.Client{
+				Transport: &http.Transport{
+					DialContext:           secureDialContext(blockedCIDRs),
+					ForceAttemptHTTP2:     true,
+					MaxIdleConns:          100,
+					IdleConnTimeout:       90 * time.Second,
+					TLSHandshakeTimeout:   10 * time.Second,
+					ExpectContinueTimeout: 1 * time.Second,
+				},
+			}
+		} else {
+			client = http.DefaultClient
+		}
 	}
 
 	return &contextImpl{
@@ -142,8 +228,10 @@ func (r *contextImpl) validateURL(rawURL string) error {
 		}
 	}
 
-	// Hostname blocklist check.
-	if _, blocked := r.blockedHosts[host]; blocked {
+	// Hostname blocklist check. Normalize to handle case differences and
+	// trailing dots (e.g. "METADATA.GOOGLE.INTERNAL" and "metadata.google.internal."
+	// both match "metadata.google.internal").
+	if _, blocked := r.blockedHosts[normalizeHost(host)]; blocked {
 		return fmt.Errorf("URL %q is blocked: hostname %q is on the blocklist", rawURL, host)
 	}
 
@@ -178,8 +266,16 @@ func (r *contextImpl) validateURL(rawURL string) error {
 }
 
 func (r *contextImpl) matchesAllowlist(reqURL *url.URL) bool {
+	reqHost := normalizeHost(reqURL.Hostname())
+	reqPort := effectivePort(reqURL)
 	for _, entry := range r.allowedURLPrefixes {
-		if reqURL.Scheme != entry.Scheme || reqURL.Host != entry.Host {
+		if reqURL.Scheme != entry.Scheme {
+			continue
+		}
+		// Compare canonicalized hostnames (case-insensitive, no trailing dot)
+		// and effective ports (defaulting from scheme when omitted), so that
+		// e.g. https://api.example.com matches https://api.example.com:443.
+		if normalizeHost(entry.Hostname()) != reqHost || effectivePort(entry) != reqPort {
 			continue
 		}
 		entryPath := entry.Path
@@ -267,13 +363,17 @@ func (r *contextImpl) Client(caBundle string) (ContextInterface, error) {
 	if ok := caCertPool.AppendCertsFromPEM([]byte(caBundle)); !ok {
 		return nil, fmt.Errorf("failed to parse PEM CA bundle for APICall")
 	}
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs:    caCertPool,
+			MinVersion: tls.VersionTLS12,
+		},
+	}
+	if len(r.blockedCIDRs) > 0 {
+		transport.DialContext = secureDialContext(r.blockedCIDRs)
+	}
 	return &contextImpl{
-		client: &http.Client{Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs:    caCertPool,
-				MinVersion: tls.VersionTLS12,
-			},
-		}},
+		client:             &http.Client{Transport: transport},
 		blockedCIDRs:       r.blockedCIDRs,
 		blockedHosts:       r.blockedHosts,
 		allowedURLPrefixes: r.allowedURLPrefixes,
