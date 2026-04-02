@@ -60,12 +60,15 @@ func secureDialContext(blockedCIDRs []*net.IPNet) func(ctx context.Context, netw
 			}
 			return base.DialContext(ctx, network, addr)
 		}
-		// Hostname: resolve, validate each IP, then dial the first valid one
-		// directly to avoid a second DNS lookup (DNS-rebinding prevention).
+		// Hostname: resolve, validate ALL IPs, then dial the first one directly
+		// to prevent DNS-rebinding. Validating all IPs (not just the one we dial)
+		// ensures a hostname is fully blocked if any of its resolved addresses
+		// falls in a blocked CIDR range.
 		ips, err := net.DefaultResolver.LookupHost(ctx, host)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve %s: %w", host, err)
 		}
+		// First pass: reject if ANY resolved IP is in a blocked range.
 		for _, ipStr := range ips {
 			ip := net.ParseIP(ipStr)
 			if ip == nil {
@@ -76,8 +79,16 @@ func secureDialContext(blockedCIDRs []*net.IPNet) func(ctx context.Context, netw
 					return nil, fmt.Errorf("connection to %s blocked: resolved IP %s falls in blocked range %s", addr, ip, cidr)
 				}
 			}
-			// Connect directly to the validated IP; pass the original hostname
-			// so that TLS SNI and certificate validation still work.
+		}
+		// Second pass: dial the first parseable address.
+		// Connect directly to the validated IP. Go's http.Transport derives
+		// the TLS ServerName from the original request URL's hostname rather
+		// than from the address given to DialContext, so TLS SNI and
+		// certificate validation remain correct when dialling by IP.
+		for _, ipStr := range ips {
+			if net.ParseIP(ipStr) == nil {
+				continue
+			}
 			return base.DialContext(ctx, network, net.JoinHostPort(ipStr, port))
 		}
 		return nil, fmt.Errorf("no usable addresses resolved for %s", host)
@@ -105,13 +116,13 @@ var DefaultBlockedHosts = []string{
 	"metadata.internal",        // Oracle Cloud metadata server
 }
 
-// ClientInterface is the interface for making HTTP requests.
-type ClientInterface interface {
+// httpDoer is the internal interface for making HTTP requests.
+type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
 type contextImpl struct {
-	client             ClientInterface
+	client             httpDoer
 	blockedCIDRs       []*net.IPNet
 	blockedHosts       map[string]struct{}
 	allowedURLPrefixes []*url.URL
@@ -119,17 +130,14 @@ type contextImpl struct {
 
 // NewHTTP creates a ContextInterface with no URL restrictions. Intended for testing and internal use.
 // For production admission controllers use NewHTTPWithDefaultBlocklist or NewHTTPWithBlocklist.
-func NewHTTP(client ClientInterface) ContextInterface {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	return &contextImpl{client: client}
+func NewHTTP() ContextInterface {
+	return &contextImpl{client: http.DefaultClient}
 }
 
 // NewHTTPWithDefaultBlocklist creates a ContextInterface with the default SSRF blocklist applied.
 // It panics if the default blocklist contains an invalid entry, which indicates a programming error.
-func NewHTTPWithDefaultBlocklist(client ClientInterface) ContextInterface {
-	ctx, err := NewHTTPWithBlocklist(client, append(DefaultBlockedCIDRs, DefaultBlockedHosts...), nil)
+func NewHTTPWithDefaultBlocklist() ContextInterface {
+	ctx, err := NewHTTPWithBlocklist(append(DefaultBlockedCIDRs, DefaultBlockedHosts...), nil)
 	if err != nil {
 		panic(fmt.Sprintf("kyverno.http: default blocklist is invalid: %v", err))
 	}
@@ -146,7 +154,7 @@ func NewHTTPWithDefaultBlocklist(client ClientInterface) ContextInterface {
 // When the allowlist is non-empty, a request URL must match at least one entry — scheme and host
 // must be identical and the request path must start with the entry's path. The blocklist is
 // still enforced on top of the allowlist for defence in depth.
-func NewHTTPWithBlocklist(client ClientInterface, blocklist, allowlist []string) (ContextInterface, error) {
+func NewHTTPWithBlocklist(blocklist, allowlist []string) (ContextInterface, error) {
 	var blockedCIDRs []*net.IPNet
 	blockedHosts := make(map[string]struct{})
 	for _, entry := range blocklist {
@@ -181,25 +189,15 @@ func NewHTTPWithBlocklist(client ClientInterface, blocklist, allowlist []string)
 		allowedURLPrefixes = append(allowedURLPrefixes, u)
 	}
 
-	// When blocked CIDRs are configured and no custom client was supplied, use a
-	// client whose DialContext enforces CIDR checks at connection time. This
-	// closes the DNS-rebinding window that exists when validateURL resolves a
-	// hostname and the http.Client later re-resolves it to a different IP.
-	if client == nil {
-		if len(blockedCIDRs) > 0 {
-			client = &http.Client{
-				Transport: &http.Transport{
-					DialContext:           secureDialContext(blockedCIDRs),
-					ForceAttemptHTTP2:     true,
-					MaxIdleConns:          100,
-					IdleConnTimeout:       90 * time.Second,
-					TLSHandshakeTimeout:   10 * time.Second,
-					ExpectContinueTimeout: 1 * time.Second,
-				},
-			}
-		} else {
-			client = http.DefaultClient
-		}
+	// When blocked CIDRs are configured, install secureDialContext in the
+	// client's transport regardless of whether a custom client was supplied.
+	// This closes the DNS-rebinding window for both default and caller-supplied
+	// clients by enforcing CIDR checks at connection time.
+	var client httpDoer
+	if len(blockedCIDRs) > 0 {
+		client = wrapClientWithSecureDial(blockedCIDRs)
+	} else {
+		client = http.DefaultClient
 	}
 
 	return &contextImpl{
@@ -210,58 +208,41 @@ func NewHTTPWithBlocklist(client ClientInterface, blocklist, allowlist []string)
 	}, nil
 }
 
+// wrapClientWithSecureDial builds an *http.Client cloned from http.DefaultTransport
+// with secureDialContext installed, so CIDR validation is enforced at connection
+// time and DNS-rebinding is prevented.
+func wrapClientWithSecureDial(blockedCIDRs []*net.IPNet) *http.Client {
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok || baseTransport == nil {
+		baseTransport = &http.Transport{}
+	}
+	t := baseTransport.Clone()
+	t.DialContext = secureDialContext(blockedCIDRs)
+	return &http.Client{Transport: t}
+}
+
+// validateURL enforces allowlist and hostname-blocklist rules before a request is
+// sent. CIDR blocking is fully delegated to secureDialContext at connection time,
+// so no pre-flight DNS resolution is needed here.
 func (r *contextImpl) validateURL(rawURL string) error {
-	if len(r.blockedCIDRs) == 0 && len(r.blockedHosts) == 0 && len(r.allowedURLPrefixes) == 0 {
+	if len(r.blockedHosts) == 0 && len(r.allowedURLPrefixes) == 0 {
 		return nil
 	}
-
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
 	host := u.Hostname()
-
 	// Allowlist check: if configured, the URL must match at least one entry.
-	if len(r.allowedURLPrefixes) > 0 {
-		if !r.matchesAllowlist(u) {
-			return fmt.Errorf("URL %q is not permitted: no matching allowlist entry", rawURL)
-		}
+	if len(r.allowedURLPrefixes) > 0 && !r.matchesAllowlist(u) {
+		return fmt.Errorf("URL %q is not permitted: no matching allowlist entry", rawURL)
 	}
-
 	// Hostname blocklist check. Normalize to handle case differences and
 	// trailing dots (e.g. "METADATA.GOOGLE.INTERNAL" and "metadata.google.internal."
 	// both match "metadata.google.internal").
 	if _, blocked := r.blockedHosts[normalizeHost(host)]; blocked {
 		return fmt.Errorf("URL %q is blocked: hostname %q is on the blocklist", rawURL, host)
 	}
-
-	// IP/CIDR blocklist check.
-	if len(r.blockedCIDRs) > 0 {
-		if ip := net.ParseIP(host); ip != nil {
-			// Host is a literal IP address.
-			if err := r.checkIP(ip, rawURL); err != nil {
-				return err
-			}
-		} else {
-			// Resolve the hostname and check each resulting IP.
-			resolveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			addrs, err := net.DefaultResolver.LookupHost(resolveCtx, host)
-			if err != nil {
-				return fmt.Errorf("URL %q is blocked: hostname resolution failed: %w", rawURL, err)
-			}
-			for _, addr := range addrs {
-				ip := net.ParseIP(addr)
-				if ip == nil {
-					continue
-				}
-				if err := r.checkIP(ip, rawURL); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -302,15 +283,6 @@ func (r *contextImpl) matchesAllowlist(reqURL *url.URL) bool {
 	return false
 }
 
-func (r *contextImpl) checkIP(ip net.IP, rawURL string) error {
-	for _, cidr := range r.blockedCIDRs {
-		if cidr.Contains(ip) {
-			return fmt.Errorf("URL %q is blocked: resolved IP %s falls in blocked range %s", rawURL, ip, cidr)
-		}
-	}
-	return nil
-}
-
 func (r *contextImpl) Get(url string, headers map[string]string) (any, error) {
 	if err := r.validateURL(url); err != nil {
 		return nil, err
@@ -322,7 +294,7 @@ func (r *contextImpl) Get(url string, headers map[string]string) (any, error) {
 	for h, v := range headers {
 		req.Header.Add(h, v)
 	}
-	return r.executeRequest(r.client, req)
+	return r.executeRequest(req)
 }
 
 func (r *contextImpl) Post(url string, data any, headers map[string]string) (any, error) {
@@ -340,11 +312,11 @@ func (r *contextImpl) Post(url string, data any, headers map[string]string) (any
 	for h, v := range headers {
 		req.Header.Add(h, v)
 	}
-	return r.executeRequest(r.client, req)
+	return r.executeRequest(req)
 }
 
-func (r *contextImpl) executeRequest(client ClientInterface, req *http.Request) (any, error) {
-	resp, err := client.Do(req)
+func (r *contextImpl) executeRequest(req *http.Request) (any, error) {
+	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
