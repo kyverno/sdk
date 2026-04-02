@@ -376,11 +376,19 @@ func (r *contextImpl) Client(caBundle string) (ContextInterface, error) {
 	if ok := caCertPool.AppendCertsFromPEM([]byte(caBundle)); !ok {
 		return nil, fmt.Errorf("failed to parse PEM CA bundle for APICall")
 	}
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			RootCAs:    caCertPool,
-			MinVersion: tls.VersionTLS12,
-		},
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok || baseTransport == nil {
+		baseTransport = &http.Transport{}
+	}
+	transport := baseTransport.Clone()
+	if transport.TLSClientConfig != nil {
+		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+	} else {
+		transport.TLSClientConfig = &tls.Config{}
+	}
+	transport.TLSClientConfig.RootCAs = caCertPool
+	if transport.TLSClientConfig.MinVersion < tls.VersionTLS12 {
+		transport.TLSClientConfig.MinVersion = tls.VersionTLS12
 	}
 	if len(r.blockedCIDRs) > 0 {
 		transport.DialContext = secureDialContext(r.blockedCIDRs)
