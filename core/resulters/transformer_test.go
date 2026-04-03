@@ -78,16 +78,20 @@ func TestTransformer_ImplementsResulter(t *testing.T) {
 		P string
 		I int
 		O bool
-	} { return struct {
-		P string
-		I int
-		O bool
-	}{policy, in, out} }
+	} {
+		return struct {
+			P string
+			I int
+			O bool
+		}{policy, in, out}
+	}
 	result := func(s []struct {
 		P string
 		I int
 		O bool
-	}) int { return len(s) }
+	}) int {
+		return len(s)
+	}
 	inner := NewAppender[string, int, struct {
 		P string
 		I int

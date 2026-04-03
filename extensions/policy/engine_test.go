@@ -60,7 +60,8 @@ func TestNewEngine_Handle_PropagatesEvaluationError(t *testing.T) {
 }
 
 // ensureEngineResultType compiles only if the engine has the expected result type.
-func ensureEngineResultType(_ core.Engine[map[string]bool, string, defaults.Result[accessPolicy, map[string]bool, string, Evaluation[bool]]]) {}
+func ensureEngineResultType(_ core.Engine[map[string]bool, string, defaults.Result[accessPolicy, map[string]bool, string, Evaluation[bool]]]) {
+}
 
 func TestNewEngine_ResultTypeMatchesDefaults(t *testing.T) {
 	src := core.MakeSource(accessPolicy{})
