@@ -182,6 +182,26 @@ func TestImage(t *testing.T) {
 			expectValue: types.String("sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2"),
 		},
 		{
+			name:        "identifier_with_separator_tag",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64:testtag").identifierWithSeparator()`,
+			expectValue: types.String(":testtag"),
+		},
+		{
+			name:        "identifier_with_separator_default",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64").identifierWithSeparator()`,
+			expectValue: types.String(":latest"),
+		},
+		{
+			name:        "identifier_with_separator_digest",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2").identifierWithSeparator()`,
+			expectValue: types.String("@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2"),
+		},
+		{
+			name:        "identifier_with_separator_tag_and_digest",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64:latest@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2").identifierWithSeparator()`,
+			expectValue: types.String(":latest@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2"),
+		},
+		{
 			name:        "tag",
 			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64:testtag").tag()`,
 			expectValue: types.String("testtag"),
