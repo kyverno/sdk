@@ -208,6 +208,70 @@ func NewHTTPWithBlocklist(blocklist, allowlist []string) (ContextInterface, erro
 	}, nil
 }
 
+// lazyContextImpl defers parsing of blocklist/allowlist entries until the first
+// Get or Post call. Construction is always safe regardless of entry validity.
+type lazyContextImpl struct {
+	blocklistFn func() []string
+	allowlistFn func() []string
+	// caBundle is set when Client() is called on a lazyContextImpl.
+	caBundle string
+}
+
+// NewLazyHTTPContext creates a ContextInterface whose blocklist/allowlist
+// configuration is evaluated lazily at each Get/Post call. blocklistFn and
+// allowlistFn are never called during construction, so this constructor never
+// returns an error. If either function returns malformed entries at call time,
+// Get/Post return a call-time error using the same messages as NewHTTPWithBlocklist.
+func NewLazyHTTPContext(blocklistFn, allowlistFn func() []string) ContextInterface {
+	return &lazyContextImpl{blocklistFn: blocklistFn, allowlistFn: allowlistFn}
+}
+
+// build resolves the current blocklist/allowlist and constructs a contextImpl,
+// applying the optional CA bundle when set.
+func (l *lazyContextImpl) build() (ContextInterface, error) {
+	var blocklist, allowlist []string
+	if l.blocklistFn != nil {
+		blocklist = l.blocklistFn()
+	}
+	if l.allowlistFn != nil {
+		allowlist = l.allowlistFn()
+	}
+	ctx, err := NewHTTPWithBlocklist(blocklist, allowlist)
+	if err != nil {
+		return nil, err
+	}
+	if l.caBundle != "" {
+		return ctx.Client(l.caBundle)
+	}
+	return ctx, nil
+}
+
+func (l *lazyContextImpl) Get(url string, headers map[string]string) (any, error) {
+	ctx, err := l.build()
+	if err != nil {
+		return nil, err
+	}
+	return ctx.Get(url, headers)
+}
+
+func (l *lazyContextImpl) Post(url string, data any, headers map[string]string) (any, error) {
+	ctx, err := l.build()
+	if err != nil {
+		return nil, err
+	}
+	return ctx.Post(url, data, headers)
+}
+
+// Client returns a new lazyContextImpl that uses the same provider functions
+// but with a custom CA bundle applied at call time.
+func (l *lazyContextImpl) Client(caBundle string) (ContextInterface, error) {
+	return &lazyContextImpl{
+		blocklistFn: l.blocklistFn,
+		allowlistFn: l.allowlistFn,
+		caBundle:    caBundle,
+	}, nil
+}
+
 // wrapClientWithSecureDial builds an *http.Client cloned from http.DefaultTransport
 // with secureDialContext installed, so CIDR validation is enforced at connection
 // time and DNS-rebinding is prevented.

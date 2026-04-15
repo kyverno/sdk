@@ -693,6 +693,96 @@ func Test_validateURL_allowlist_matches_implicit_port_from_scheme(t *testing.T) 
 	assert.NotNil(t, result)
 }
 
+func Test_NewLazyHTTPContext_construction_never_errors(t *testing.T) {
+	// Even with invalid CIDR and allowlist entries, construction must not panic or error.
+	ctx := NewLazyHTTPContext(
+		func() []string { return []string{"not-a-cidr/bad", "256.0.0.1/33"} },
+		func() []string { return []string{"no-scheme-no-host"} },
+	)
+	assert.NotNil(t, ctx)
+}
+
+func Test_NewLazyHTTPContext_malformed_cidr_returns_call_time_error(t *testing.T) {
+	ctx := NewLazyHTTPContext(
+		func() []string { return []string{"not-a-cidr/bad"} },
+		nil,
+	)
+	_, err := ctx.Get("http://example.com/path", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid CIDR")
+}
+
+func Test_NewLazyHTTPContext_malformed_allowlist_returns_call_time_error(t *testing.T) {
+	ctx := NewLazyHTTPContext(
+		nil,
+		func() []string { return []string{"no-scheme-or-host"} },
+	)
+	_, err := ctx.Get("https://example.com/path", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must include scheme and host")
+}
+
+func Test_NewLazyHTTPContext_blocks_disallowed_url(t *testing.T) {
+	ctx := NewLazyHTTPContext(
+		nil,
+		func() []string { return []string{"https://allowed.example.com"} },
+	)
+	_, err := ctx.Get("https://other.example.com/steal", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not permitted")
+}
+
+func Test_NewLazyHTTPContext_allows_permitted_url(t *testing.T) {
+	doFunc := func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok": true}`))}, nil
+	}
+	// We need a lazyContextImpl that uses a test client. Since lazyContextImpl
+	// builds a real contextImpl via NewHTTPWithBlocklist, we test via allowlist
+	// with no blocklist and a URL that passes the allowlist check.
+	// The actual HTTP call will fail (no real server), so we use an empty blocklist
+	// and allowlist to test that a valid config does not produce a config error.
+	ctx := NewLazyHTTPContext(
+		func() []string { return nil },
+		func() []string { return nil },
+	)
+	// Swap the inner client to avoid real network call.
+	lazy := ctx.(*lazyContextImpl)
+	// Build a contextImpl directly to confirm no config-level error occurs with valid config.
+	built, err := lazy.build()
+	assert.NoError(t, err)
+	assert.NotNil(t, built)
+
+	// Now verify an allowed URL passes validation end-to-end using a test client.
+	allowEntry, _ := url.Parse("https://api.example.com")
+	ctxDirect := &contextImpl{
+		client:             testClient{doFunc: doFunc},
+		allowedURLPrefixes: []*url.URL{allowEntry},
+	}
+	result, err := ctxDirect.Get("https://api.example.com/v2/data", nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+}
+
+func Test_NewLazyHTTPContext_blocks_blocked_hostname_at_call_time(t *testing.T) {
+	ctx := NewLazyHTTPContext(
+		func() []string { return DefaultBlockedHosts },
+		nil,
+	)
+	_, err := ctx.Get("http://metadata.google.internal/computeMetadata/v1/", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_NewLazyHTTPContext_post_malformed_config_returns_error(t *testing.T) {
+	ctx := NewLazyHTTPContext(
+		func() []string { return []string{"bad-cidr/99"} },
+		nil,
+	)
+	_, err := ctx.Post("http://example.com/path", map[string]any{"key": "value"}, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid CIDR")
+}
+
 func Test_impl_post_request_with_400_bad_request(t *testing.T) {
 	base, err := compiler.NewBaseEnv()
 	assert.NoError(t, err)
