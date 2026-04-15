@@ -199,7 +199,7 @@ func TestImage(t *testing.T) {
 		{
 			name:        "identifier_with_separator_tag_and_digest",
 			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64:latest@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2").identifierWithSeparator()`,
-			expectValue: types.String(":latest@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2"),
+			expectValue: types.String("@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2"),
 		},
 		{
 			name:        "tag",
