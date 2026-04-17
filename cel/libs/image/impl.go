@@ -100,20 +100,8 @@ func imageIdentifierWithSeparator(arg ref.Val) ref.Val {
 	}
 	// Check for digest first (digest takes precedence when both tag and digest are present)
 	if digest, ok := v.(name.Digest); ok {
-		if digestStr := digest.DigestStr(); digestStr != "" {
-			return types.String("@" + digestStr)
-		}
+		return types.String("@" + digest.DigestStr())
 	}
-	// Check for tag
-	if tag, ok := v.(name.Tag); ok {
-		if tagStr := tag.TagStr(); tagStr != "" {
-			return types.String(":" + tagStr)
-		}
-	}
-	// Fallback to default identifier (e.g., "latest")
-	identifier := v.Identifier()
-	if identifier != "" {
-		return types.String(":" + identifier)
-	}
-	return types.String("")
+	// For tag references (including default "latest"), use ":" separator
+	return types.String(":" + v.Identifier())
 }
