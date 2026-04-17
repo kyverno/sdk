@@ -65,7 +65,7 @@ type apiWithPredicate[API any, API_PTR api[API]] struct {
 //	}
 //	objs, _ := src.Load(ctx) // snapshot of current ConfigMaps
 func NewApiWithPredicate[API any, API_PTR api[API]](name string, mgr ctrl.Manager, options controller.Options, predicate func(string, API_PTR, bool)) (*apiWithPredicate[API, API_PTR], error) {
-	provider := new(apiWithPredicate[API, API_PTR])
+	provider := newApiWithPredicate[API, API_PTR](mgr.GetClient())
 
 	// Zero-value API for controller registration
 	var api API
@@ -114,4 +114,14 @@ func (r *apiWithPredicate[API, API_PTR]) Reconcile(ctx context.Context, req ctrl
 	r.predicate(req.String(), ptr, false)
 	// // Object created or updated — store a copy in cache so we don't retain a pointer to stack
 	return ctrl.Result{}, nil
+}
+
+// newApiSource creates a bare apiSource instance with initialized fields.
+//
+// Primarily used internally by NewApiSource. Initializes the mutex and
+// in-memory resource map.
+func newApiWithPredicate[API any, API_PTR api[API]](client client.Client) *apiWithPredicate[API, API_PTR] {
+	return &apiWithPredicate[API, API_PTR]{
+		client: client,
+	}
 }
