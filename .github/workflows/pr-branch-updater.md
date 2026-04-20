@@ -16,8 +16,8 @@ steps:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     run: |
       mkdir -p /tmp/gh-aw/agent
-      gh api "repos/${{ github.repository }}/pulls?state=open&per_page=100" \
-        --jq '[.[] | {number, title, draft, head_ref: .head.ref, base_ref: .base.ref}]' \
+      gh api --paginate "repos/${{ github.repository }}/pulls?state=open&per_page=100" \
+        | jq -s 'add | map({number, title, draft, head_ref: .head.ref, base_ref: .base.ref})' \
         > /tmp/gh-aw/agent/open-prs.json
       COUNT=$(jq length /tmp/gh-aw/agent/open-prs.json)
       echo "Found $COUNT open PRs"
