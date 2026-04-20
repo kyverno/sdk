@@ -2,6 +2,8 @@
 description: Find open PRs that are behind the base branch and automatically trigger a branch update.
 on:
   schedule: every 1h
+engine:
+  id: copilot
 permissions:
   contents: read
   pull-requests: read
