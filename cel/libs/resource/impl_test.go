@@ -23,6 +23,11 @@ func Test_impl_get_resource_string_string_string_string(t *testing.T) {
 	ctx := Context{
 		&ContextMock{
 			GetResourceFunc: func(apiVersion, resource, namespace, name string) (*unstructured.Unstructured, error) {
+				if apiVersion != "apps/v1" && resource != "deployments" {
+					return nil, apierrors.NewNotFound(schema.GroupResource{
+						Resource: resource,
+					}, name)
+				}
 				return &unstructured.Unstructured{
 					Object: map[string]any{
 						"apiVersion": "apps/v1",
@@ -37,23 +42,47 @@ func Test_impl_get_resource_string_string_string_string(t *testing.T) {
 		},
 	}
 
+	tests := []struct {
+		name string
+		expr string
+		want ref.Val
+	}{
+		{
+			name: "basic_test",
+			expr: `resource.get("apps/v1", "deployments", "default", "nginx")`,
+			want: types.DefaultTypeAdapter.NativeToValue(map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]any{
+					"name":      "nginx",
+					"namespace": "default",
+				},
+			}),
+		},
+		{
+			name: "not_found_doesnt_error",
+			expr: `resource.get("something/v1", "animals", "default", "nginx")`,
+			want: types.NullValue,
+		},
+	}
 	env, err := base.Extend(
 		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
-	ast, issues := env.Compile(`resource.get("apps/v1", "deployments", "default", "nginx")`)
-	assert.Nil(t, issues)
-	assert.NotNil(t, ast)
-	prog, err := env.Program(ast)
-	assert.NoError(t, err)
-	assert.NotNil(t, prog)
 
-	out, _, err := prog.Eval(map[string]any{})
-	assert.NoError(t, err)
-	object := out.Value().(map[string]any)
-	assert.Equal(t, object["apiVersion"].(string), "apps/v1")
-	assert.Equal(t, object["kind"].(string), "Deployment")
+	for _, tt := range tests {
+		ast, issues := env.Compile(tt.expr)
+		assert.Nil(t, issues)
+		assert.NotNil(t, ast)
+		prog, err := env.Program(ast)
+		assert.NoError(t, err)
+		assert.NotNil(t, prog)
+
+		out, _, err := prog.Eval(map[string]any{})
+		assert.NoError(t, err)
+		assert.Equal(t, out.Value(), tt.want.Value())
+	}
 }
 
 func Test_impl_get_resource_string_string_string_string_error(t *testing.T) {

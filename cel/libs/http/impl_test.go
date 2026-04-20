@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -540,6 +541,156 @@ func Test_impl_get_request_with_array_response(t *testing.T) {
 	bodyArray := result["body"].([]any)
 	assert.Len(t, bodyArray, 2)
 	assert.Equal(t, bodyArray[0].(map[string]any)["item"], float64(1))
+}
+
+func Test_NewHTTPWithBlocklist_invalid_cidr(t *testing.T) {
+	_, err := NewHTTPWithBlocklist([]string{"not-a-cidr/bad"}, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid CIDR")
+}
+
+func Test_NewHTTPWithBlocklist_invalid_allowlist(t *testing.T) {
+	_, err := NewHTTPWithBlocklist(nil, []string{"no-scheme-or-host"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must include scheme and host")
+}
+
+func Test_validateURL_blocks_loopback_ip(t *testing.T) {
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get("http://127.0.0.1/secret", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_validateURL_blocks_link_local_ip(t *testing.T) {
+	// 169.254.169.254 is the canonical cloud metadata IP (AWS, GCP, Azure, DigitalOcean).
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get("http://169.254.169.254/latest/meta-data/iam/security-credentials/", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_validateURL_blocks_rfc1918_ip(t *testing.T) {
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get("http://10.0.0.1/internal", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_validateURL_blocks_hostname(t *testing.T) {
+	ctx, err := NewHTTPWithBlocklist(nil, []string{"https://allowed.example.com"})
+	// empty blocklist, non-matching allowlist
+	assert.NoError(t, err)
+	_, err = ctx.Get("https://other.example.com/path", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not permitted")
+}
+
+func Test_validateURL_allowlist_permits_matching_url(t *testing.T) {
+	doFunc := func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok": true}`))}, nil
+	}
+	allowEntry, _ := url.Parse("https://api.example.com")
+	ctx := &contextImpl{
+		client:             testClient{doFunc: doFunc},
+		allowedURLPrefixes: []*url.URL{allowEntry},
+	}
+	result, err := ctx.Get("https://api.example.com/v1/resource", nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+}
+
+func Test_validateURL_allowlist_rejects_different_host(t *testing.T) {
+	ctx, err := NewHTTPWithBlocklist(nil, []string{"https://api.example.com"})
+	assert.NoError(t, err)
+	// Attacker tries to abuse prefix matching by using api.example.com.evil.com
+	_, err = ctx.Get("https://api.example.com.evil.com/steal", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not permitted")
+}
+
+func Test_validateURL_blocklist_carried_through_client(t *testing.T) {
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	// Client() with empty caBundle returns same ctx
+	derived, err := ctx.Client("")
+	assert.NoError(t, err)
+	_, err = derived.Get("http://127.0.0.1/secret", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_validateURL_no_blocklist_allows_any(t *testing.T) {
+	doFunc := func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	}
+	// contextImpl with no blocklist — even internal IPs are allowed (test/internal use)
+	ctx := &contextImpl{client: testClient{doFunc: doFunc}}
+	result, err := ctx.Get("http://127.0.0.1/test", nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+}
+
+func Test_validateURL_blocked_hostname(t *testing.T) {
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedHosts, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get("http://metadata.google.internal/computeMetadata/v1/", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_validateURL_blocks_hostname_uppercase(t *testing.T) {
+	// Hostname comparisons must be case-insensitive: blocklist entry stored as
+	// lowercase should still block an uppercase request hostname.
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedHosts, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get("http://METADATA.GOOGLE.INTERNAL/computeMetadata/v1/", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_validateURL_blocks_hostname_trailing_dot(t *testing.T) {
+	// The trailing-dot FQDN form is equivalent to the bare hostname; both must be blocked.
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedHosts, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get("http://metadata.google.internal./computeMetadata/v1/", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked")
+}
+
+func Test_validateURL_allowlist_matches_explicit_default_port(t *testing.T) {
+	// An allowlist entry without a port must match a request URL that includes
+	// the default port for its scheme (e.g. :443 for https).
+	doFunc := func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok": true}`))}, nil
+	}
+	allowEntry, _ := url.Parse("https://api.example.com")
+	ctx := &contextImpl{
+		client:             testClient{doFunc: doFunc},
+		allowedURLPrefixes: []*url.URL{allowEntry},
+	}
+	result, err := ctx.Get("https://api.example.com:443/v1/resource", nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+}
+
+func Test_validateURL_allowlist_matches_implicit_port_from_scheme(t *testing.T) {
+	// A request URL without an explicit port must match an allowlist entry that
+	// includes the default port for the scheme.
+	doFunc := func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok": true}`))}, nil
+	}
+	allowEntry, _ := url.Parse("https://api.example.com:443")
+	ctx := &contextImpl{
+		client:             testClient{doFunc: doFunc},
+		allowedURLPrefixes: []*url.URL{allowEntry},
+	}
+	result, err := ctx.Get("https://api.example.com/v1/resource", nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
 }
 
 func Test_impl_post_request_with_400_bad_request(t *testing.T) {

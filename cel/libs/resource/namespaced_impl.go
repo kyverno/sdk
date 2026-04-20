@@ -97,6 +97,9 @@ func (c *namespacedImpl) get_resource_string_string_string(args ...ref.Val) ref.
 	} else {
 		res, err := self.GetResource(apiVersion, resource, c.namespace, name)
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return types.NullValue
+			}
 			if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
 				return types.NewErr("failed to get resource: permission denied: %v", err)
 			}
