@@ -18,10 +18,10 @@ require (
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93
 	golang.org/x/sync v0.20.0
 	google.golang.org/protobuf v1.36.11
-	k8s.io/api v0.35.2
+	k8s.io/api v0.35.4
 	k8s.io/apimachinery v0.35.4
 	k8s.io/apiserver v0.35.2
-	k8s.io/client-go v0.35.2
+	k8s.io/client-go v0.35.4
 	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/release-utils v0.12.4
 	sigs.k8s.io/yaml v1.6.0
