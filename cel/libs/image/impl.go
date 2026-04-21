@@ -1,6 +1,8 @@
 package image
 
 import (
+	"strings"
+
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -67,6 +69,16 @@ func imageTag(arg ref.Val) ref.Val {
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(arg)
 	}
+
+	// Workaround for upstream not detecting the tag correctly when tag and digest are both present.
+	// See https://github.com/google/go-containerregistry/issues/2069
+	original := v.String()
+	if strings.Contains(original, "@") {
+		parts := strings.Split(original, "@")
+		tagWithoutDigest := parts[0]
+		v, _ = name.NewTag(tagWithoutDigest, name.StrictValidation)
+	}
+
 	var tag string
 	if v, ok := v.(name.Tag); ok {
 		tag = v.TagStr()
