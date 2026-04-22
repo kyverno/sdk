@@ -3,7 +3,7 @@ package random
 import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/kyverno/sdk/cel/utils"
+	"github.com/kyverno/sdk/extensions/cel/utils"
 	regen "github.com/zach-klippenstein/goregen"
 )
 
