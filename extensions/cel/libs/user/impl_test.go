@@ -8,7 +8,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/cel/compiler"
-	"github.com/kyverno/sdk/cel/utils"
+	"github.com/kyverno/sdk/extensions/cel/utils"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -7,8 +7,8 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/kyverno/sdk/cel/utils"
 	"github.com/kyverno/sdk/extensions/cel/libs/versions"
+	"github.com/kyverno/sdk/extensions/cel/utils"
 	"k8s.io/apimachinery/pkg/util/version"
 )
 
