@@ -15,13 +15,14 @@ steps:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     run: |
+      set -euo pipefail
       mkdir -p /tmp/gh-aw/agent
       gh api --paginate "repos/${{ github.repository }}/pulls?state=open&per_page=100" \
         | jq -s 'add | map({number, title, draft, head_ref: .head.ref, base_ref: .base.ref})' \
         > /tmp/gh-aw/agent/open-prs.json
       COUNT=$(jq length /tmp/gh-aw/agent/open-prs.json)
       echo "Found $COUNT open PRs"
-      jq -r '.[] | "  #\(.number) [\(if .draft then \"draft\" else \"open\" end)] \(.head_ref) -> \(.base_ref): \(.title)"' \
+      jq -r '.[] | "  #\(.number) [\(if .draft then "draft" else "open" end)] \(.head_ref) -> \(.base_ref): \(.title)"' \
         /tmp/gh-aw/agent/open-prs.json
 safe-outputs:
   noop: {}
