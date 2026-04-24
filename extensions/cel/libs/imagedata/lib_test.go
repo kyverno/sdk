@@ -3,7 +3,7 @@ package imagedata
 import (
 	"testing"
 
-	"github.com/kyverno/sdk/cel/compiler"
+	"github.com/kyverno/sdk/extensions/cel/compiler"
 	"github.com/stretchr/testify/assert"
 )
 

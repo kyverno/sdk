@@ -8,7 +8,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/kyverno/sdk/cel/compiler"
+	"github.com/kyverno/sdk/extensions/cel/compiler"
 	"github.com/kyverno/sdk/extensions/cel/libs/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
