@@ -85,3 +85,23 @@ func imageDigest(arg ref.Val) ref.Val {
 	}
 	return types.String(digest)
 }
+
+// imageIdentifierWithSeparator returns the image identifier with its separator.
+// When both a tag and digest are present, the digest takes precedence (consistent with identifier()).
+// Examples:
+//   - nginx:1.25 -> ":1.25"
+//   - nginx@sha256:abc123 -> "@sha256:abc123"
+//   - nginx:1.25@sha256:abc123 -> "@sha256:abc123"
+//   - nginx (no tag) -> ":latest" (default tag)
+func imageIdentifierWithSeparator(arg ref.Val) ref.Val {
+	v, ok := arg.Value().(name.Reference)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(arg)
+	}
+	// Check for digest first (digest takes precedence when both tag and digest are present)
+	if digest, ok := v.(name.Digest); ok {
+		return types.String("@" + digest.DigestStr())
+	}
+	// For tag references (including default "latest"), use ":" separator
+	return types.String(":" + v.Identifier())
+}
