@@ -28,7 +28,7 @@ func Test_apply_generator_string_list(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, version.MajorMinor(1, 18)),
+		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -56,13 +56,49 @@ generator.apply(
 	assert.NoError(t, err)
 }
 
+func Test_apply_namespaced_cross_namespace_denied(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+
+	called := false
+	ctx := Context{&ContextMock{
+		GenerateResourcesFunc: func(namespace string, dataList []map[string]any) error {
+			called = true
+			return nil
+		},
+	}}
+
+	env, err := base.Extend(
+		Lib(&ctx, "tenant-ns", version.MajorMinor(1, 18)),
+	)
+	assert.NoError(t, err)
+
+	// cross-namespace call must be rejected
+	ast, issues := env.Compile(`generator.apply("kube-system", [{"apiVersion": dyn("v1"), "kind": dyn("ConfigMap")}])`)
+	assert.Nil(t, issues)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	_, _, err = prog.Eval(map[string]any{})
+	assert.ErrorContains(t, err, "cross-namespace generation denied")
+	assert.False(t, called, "GenerateResources must not be called on cross-namespace attempt")
+
+	// same-namespace call must succeed
+	ast, issues = env.Compile(`generator.apply("tenant-ns", [{"apiVersion": dyn("v1"), "kind": dyn("ConfigMap")}])`)
+	assert.Nil(t, issues)
+	prog, err = env.Program(ast)
+	assert.NoError(t, err)
+	_, _, err = prog.Eval(map[string]any{})
+	assert.NoError(t, err)
+	assert.True(t, called, "GenerateResources must be called for same-namespace generation")
+}
+
 func Test_apply_generator_string_list_error(t *testing.T) {
 	base, err := compiler.NewBaseEnv()
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, Latest()),
+		Lib(nil, "", Latest()),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
