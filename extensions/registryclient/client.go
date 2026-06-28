@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	gcrremote "github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/kyverno/pkg/tracing"
 	"github.com/kyverno/sdk/extensions/regcreds"
@@ -45,6 +46,39 @@ var (
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 )
+
+// Return an array of global opts that are going to be the global registry cient's if its
+// inialized, otherwise some sane defaults. This function takes in a context not because
+// the creation of options makes a cancellable call, but beecause there's a WithContext
+// remote option that gets initialized. So the caller must pass their own inherited context
+// or construct a new one to be used for the call to the remote registry
+func GlobalOptsOrDefault(ctx context.Context, localRegistry bool) ([]remote.Option, error) {
+	if registryClient != nil {
+		opts, err := registryClient.Options(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return opts, nil
+	}
+
+	// there's no registry client, instantiate defaults
+	return DefaultOpts(localRegistry), nil
+}
+
+func DefaultOpts(localRegistry bool) []remote.Option {
+	remoteOpts := []remote.Option{}
+	remoteOpts = append(remoteOpts,
+		remote.WithTransport(DefaultTransport),
+		remote.WithUserAgent(userAgent),
+	)
+
+	if localRegistry {
+		remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	} else {
+		remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(regcreds.AnonymousKeychain))
+	}
+	return remoteOpts
+}
 
 func GetRegistryClient() (Client, error) {
 	if registryClient == nil {

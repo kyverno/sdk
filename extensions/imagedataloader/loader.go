@@ -7,13 +7,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	gcrv1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/api/api/policies.kyverno.io/v1beta1"
-	"github.com/kyverno/sdk/extensions/regcreds"
-	"github.com/kyverno/sdk/extensions/registryclient"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
@@ -24,6 +21,10 @@ const (
 )
 
 type Fetcher interface {
+	// if we said that the new function is gonna use the default options coming from the global registry client
+	// then when should we use this one ? and at which call sites do we pass non standard options?
+	// there also doesn't seem to be a location where we use this function and pass non standard opts. then what path
+	// does the ivpol with credentials provided on the policy use ?
 	FetchImageData(ctx context.Context, image string, options ...Option) (*ImageData, error)
 }
 
@@ -32,33 +33,7 @@ type imagedatafetcher struct {
 	defaultOptions []remote.Option
 }
 
-func New(lister k8scorev1.SecretInterface, localRegistry bool) (*imagedatafetcher, error) {
-	remoteOpts := []remote.Option{}
-
-	rg, err := registryclient.GetRegistryClient()
-	if err != nil {
-		// an error here means that the registry client is not set. we can't get opts from it
-		remoteOpts = append(remoteOpts,
-			remote.WithTransport(registryclient.DefaultTransport),
-			remote.WithUserAgent(UserAgent),
-			remote.WithAuthFromKeychain(authn.NewMultiKeychain(regcreds.AnonymousKeychain)),
-		)
-		// its ok to only check this value here and not in the registry client block.
-		// this value being true means we are being called from the kyverno CLI which would never
-		// instantiate the registry client to begin with
-		if localRegistry {
-			remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(authn.DefaultKeychain))
-		} else {
-			remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(regcreds.AnonymousKeychain))
-		}
-	} else {
-		globalRegistryOpts, err := rg.Options(context.TODO())
-		if err != nil {
-			return nil, err
-		}
-		remoteOpts = append(remoteOpts, globalRegistryOpts...)
-	}
-
+func New(lister k8scorev1.SecretInterface, remoteOpts []remote.Option) (*imagedatafetcher, error) {
 	return &imagedatafetcher{
 		lister:         lister,
 		defaultOptions: remoteOpts,
@@ -66,7 +41,9 @@ func New(lister k8scorev1.SecretInterface, localRegistry bool) (*imagedatafetche
 }
 
 // who calls this function ? because it does its own option initialization. if passes custom stuff then we can't use the
-// gloabl client
+// gloabl client.
+// the thing about this, is that its not a constructor.it wont return an idl with custom options. how do we have a solution for when
+// we want to create a long lived image data loader ? thats the image context.. well it needs to be renamed because that name sucks kinda
 func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, options ...Option) (*ImageData, error) {
 	img := ImageData{
 		referrersData: make(map[string]referrerData),

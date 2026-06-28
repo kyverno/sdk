@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"golang.org/x/sync/errgroup"
 	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
@@ -24,13 +25,11 @@ type ImageContext interface {
 	Get(ctx context.Context, image string, opts ...Option) (*ImageData, error)
 }
 
-// this function takes in image data loader opts to create an image data loader.
-// if we wanna make the idl rely on the registry client's options, this function can't therefore take idl options
-// which we wanna cancel altogether
-// does an image context ever get created in the cli?
-// why does this type even exist ? why can't we just use the idl ?
-func NewImageContext(lister k8scorev1.SecretInterface, opts ...Option) (ImageContext, error) {
-	idl, err := New(lister, false)
+// Creates an image data loader along with a cache that stores images. Calling .Get
+// on that type performs a read from that cache and fallback to calling the remote if
+// the image was not found
+func NewImageContext(lister k8scorev1.SecretInterface, opts []remote.Option) (ImageContext, error) {
+	idl, err := New(lister, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +39,7 @@ func NewImageContext(lister k8scorev1.SecretInterface, opts ...Option) (ImageCon
 	}, nil
 }
 
+// this is where i pass non standard options to the imagedataloader. this gets called during ivpol.Evaluate
 func (idc *imageContext) AddImages(ctx context.Context, images []string, opts ...Option) error {
 	idc.Lock()
 	defer idc.Unlock()
