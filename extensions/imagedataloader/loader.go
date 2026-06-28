@@ -7,10 +7,13 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	gcrv1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/api/api/policies.kyverno.io/v1beta1"
+	"github.com/kyverno/sdk/extensions/regcreds"
+	"github.com/kyverno/sdk/extensions/registryclient"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
@@ -29,17 +32,41 @@ type imagedatafetcher struct {
 	defaultOptions []remote.Option
 }
 
-func New(lister k8scorev1.SecretInterface, opts ...Option) (*imagedatafetcher, error) {
-	remoteOpts, err := makeDefaultOpts(lister, opts...)
+func New(lister k8scorev1.SecretInterface, localRegistry bool) (*imagedatafetcher, error) {
+	remoteOpts := []remote.Option{}
+
+	rg, err := registryclient.GetRegistryClient()
 	if err != nil {
-		return nil, err
+		// an error here means that the registry client is not set. we can't get opts from it
+		remoteOpts = append(remoteOpts,
+			remote.WithTransport(registryclient.DefaultTransport),
+			remote.WithUserAgent(UserAgent),
+			remote.WithAuthFromKeychain(authn.NewMultiKeychain(regcreds.AnonymousKeychain)),
+		)
+		// its ok to only check this value here and not in the registry client block.
+		// this value being true means we are being called from the kyverno CLI which would never
+		// instantiate the registry client to begin with
+		if localRegistry {
+			remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+		} else {
+			remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(regcreds.AnonymousKeychain))
+		}
+	} else {
+		globalRegistryOpts, err := rg.Options(context.TODO())
+		if err != nil {
+			return nil, err
+		}
+		remoteOpts = append(remoteOpts, globalRegistryOpts...)
 	}
+
 	return &imagedatafetcher{
 		lister:         lister,
 		defaultOptions: remoteOpts,
 	}, nil
 }
 
+// who calls this function ? because it does its own option initialization. if passes custom stuff then we can't use the
+// gloabl client
 func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, options ...Option) (*ImageData, error) {
 	img := ImageData{
 		referrersData: make(map[string]referrerData),
@@ -113,7 +140,7 @@ func (i *imagedatafetcher) remoteOptions(ctx context.Context, lister k8scorev1.S
 	var opts []remote.Option
 	opts = append(opts, i.defaultOptions...)
 
-	authOpts, err := makeAuthOptions(lister, options...)
+	authOpts, err := makeAuthOptions(nil, options...)
 	if err != nil {
 		return nil, err
 	}

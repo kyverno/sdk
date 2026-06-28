@@ -24,8 +24,13 @@ type ImageContext interface {
 	Get(ctx context.Context, image string, opts ...Option) (*ImageData, error)
 }
 
+// this function takes in image data loader opts to create an image data loader.
+// if we wanna make the idl rely on the registry client's options, this function can't therefore take idl options
+// which we wanna cancel altogether
+// does an image context ever get created in the cli?
+// why does this type even exist ? why can't we just use the idl ?
 func NewImageContext(lister k8scorev1.SecretInterface, opts ...Option) (ImageContext, error) {
-	idl, err := New(lister, opts...)
+	idl, err := New(lister, false)
 	if err != nil {
 		return nil, err
 	}
