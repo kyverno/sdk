@@ -25,7 +25,7 @@ type Client interface {
 	FetchImageDescriptor(context.Context, string) (*gcrremote.Descriptor, error)
 
 	// Options returns remote.Option configuration for the client.
-	Options(context.Context) ([]gcrremote.Option, error)
+	Options(context.Context) ([]gcrremote.Option, []name.Option, error)
 
 	// NameOptions returns name.Option configuration for the client.
 	NameOptions() []name.Option

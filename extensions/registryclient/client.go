@@ -30,18 +30,18 @@ var (
 // the creation of options makes a cancellable call, but beecause there's a WithContext
 // remote option that gets initialized. So the caller must pass their own inherited context
 // or construct a new one to be used for the call to the remote registry
-func GlobalOptsOrDefault(ctx context.Context, localRegistry bool) ([]remote.Option, error) {
+func GlobalOptsOrDefault(ctx context.Context, localRegistry bool) ([]remote.Option, []name.Option, error) {
 	if registryClient != nil {
-		opts, err := registryClient.Options(ctx)
+		opts, nameOpts, err := registryClient.Options(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return opts, nil
+		return opts, nameOpts, nil
 	}
 
 	// there's no registry client, instantiate defaults
 	ret := regcreds.DefaultOpts(localRegistry)
-	return ret[:], nil
+	return ret[:], nil, nil
 }
 
 func GetRegistryClient() (Client, error) {
@@ -85,8 +85,9 @@ func SetupGlobalRegistryClient(ctx context.Context,
 		}
 
 		c := &client{
-			keychain:  authnKc,
-			transport: tracing.Transport(regcreds.DefaultTransport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)), allowInsecureRegistry: allowInsecure,
+			allowInsecureRegistry: allowInsecure,
+			keychain:              authnKc,
+			transport:             tracing.Transport(regcreds.DefaultTransport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)),
 		}
 		registryClient = c
 	})
@@ -95,7 +96,7 @@ func SetupGlobalRegistryClient(ctx context.Context,
 
 // Options returns remote.Option config parameters for the client
 // these options get passed to remote.Get
-func (c *client) Options(ctx context.Context) ([]gcrremote.Option, error) {
+func (c *client) Options(ctx context.Context) ([]gcrremote.Option, []name.Option, error) {
 	opts := []gcrremote.Option{
 		gcrremote.WithAuthFromKeychain(c.keychain),
 		gcrremote.WithTransport(c.transport),
@@ -105,17 +106,21 @@ func (c *client) Options(ctx context.Context) ([]gcrremote.Option, error) {
 
 	pusher, err := gcrremote.NewPusher(opts...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	opts = append(opts, gcrremote.Reuse(pusher))
 
 	puller, err := gcrremote.NewPuller(opts...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	opts = append(opts, gcrremote.Reuse(puller))
+	nameOpts := []name.Option{}
+	if c.allowInsecureRegistry {
+		nameOpts = append(nameOpts, name.Insecure)
+	}
 
-	return opts, nil
+	return opts, nameOpts, nil
 }
 
 // NameOptions returns name.Option config parameters for the client
@@ -137,7 +142,7 @@ func (c *client) FetchImageDescriptor(ctx context.Context, imageRef string) (*gc
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse image reference: %s, error: %w", imageRef, err)
 	}
-	remoteOpts, err := c.Options(ctx)
+	remoteOpts, _, err := c.Options(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get gcr remote opts: %s, error: %w", imageRef, err)
 	}
