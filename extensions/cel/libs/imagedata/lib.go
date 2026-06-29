@@ -17,14 +17,18 @@ const libraryName = "kyverno.imagedata"
 type lib struct {
 	imagedataIface ContextInterface
 	version        *version.Version
+	authOpts       []remote.Option // remote authentication options to pass during calls to external registries that require auth
 }
 
-func Lib(imagedataCtx ContextInterface, v *version.Version, remoteOptions []remote.Option) cel.EnvOption {
+// Initialize the imagedata library. imagedataCtx argument is whatever implements the methods for interacting with
+// an externl image registry. authOpts is the custom authentication options (secret references, allow insecure)
+// that get passed during making a call to that remote.
+func Lib(imagedataCtx ContextInterface, v *version.Version, authOpts []remote.Option) cel.EnvOption {
 	if v == nil {
 		panic(libraryName + ": library version must not be nil")
 	}
 	// create the cel lib env option
-	return cel.Lib(&lib{imagedataIface: imagedataCtx, version: v})
+	return cel.Lib(&lib{imagedataIface: imagedataCtx, version: v, authOpts: authOpts})
 }
 
 func Latest() *version.Version {

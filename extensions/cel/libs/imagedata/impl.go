@@ -9,7 +9,7 @@ import (
 
 type impl struct {
 	types.Adapter
-	remoteOpts []remote.Option
+	authOpts []remote.Option
 }
 
 func (c *impl) get_imagedata_string(args ...ref.Val) ref.Val {
@@ -23,7 +23,7 @@ func (c *impl) get_imagedata_string(args ...ref.Val) ref.Val {
 	} else {
 		// this accesses the image context. the image context must take externally defined authentication
 		// options. so the libraries constructor needs to take those options during .Lib call
-		globalRef, err := self.GetImageData(image, c.remoteOpts)
+		globalRef, err := self.GetImageData(image, c.authOpts)
 		if err != nil {
 			// Errors are not expected here since Parse is a more lenient parser than ParseRequestURI.
 			return types.NewErr("failed to get image data: %v", err)
