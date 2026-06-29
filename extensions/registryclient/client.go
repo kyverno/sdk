@@ -53,11 +53,11 @@ func GetRegistryClient() (Client, error) {
 	return registryClient, nil
 }
 
-func MustRegistryClient() (Client, error) {
+func MustRegistryClient() Client {
 	if registryClient == nil {
-		panic("registry client wasn't initialized")
+		panic("registry client wasn't initialized. please call registryclient.SetupGlobalRegistryClient")
 	}
-	return registryClient, nil
+	return registryClient
 }
 
 func SetupGlobalRegistryClient(ctx context.Context,
