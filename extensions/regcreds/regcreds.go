@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"net/url"
 	"regexp"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/awslabs/amazon-ecr-credential-helper/ecr-login"
 	"github.com/fluxcd/pkg/oci/auth/azure"
@@ -14,9 +18,11 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn/github"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/google"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/kyverno/pkg/logging"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"sigs.k8s.io/release-utils/version"
 
 	kauth "github.com/google/go-containerregistry/pkg/authn/kubernetes"
 	corev1 "k8s.io/api/core/v1"
@@ -26,12 +32,68 @@ import (
 var (
 	AnonymousKeychain authn.Keychain = anonymousKeyChain{}
 	azureKeychain     authn.Keychain = azureKeyChain{}
+
+	KyvernoUserAgent = fmt.Sprintf("Kyverno/%s (%s; %s)", version.GetVersionInfo().GitVersion, runtime.GOOS, runtime.GOARCH)
+	DefaultTransport = &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			// By default we wrap the transport in retries, so reduce the
+			// default dial timeout to 5s to avoid 5x 30s of connection
+			// timeouts when doing the "ping" on certain http registries.
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 )
 
 type autoRefreshSecrets struct {
 	lister           corev1listers.SecretLister
 	defaultNamespace string
 	imagePullSecrets []string
+}
+
+// credential providers, secrets -> get combined into one option
+// local registry -> gets combined into the same option
+func RemoteOptsFromParams(lister corev1listers.SecretLister, secrets, credentialProviders []string, localRegistry, insecure bool) [3]remote.Option {
+	ret := DefaultOpts(localRegistry)
+
+	kcs := []authn.Keychain{}
+	if len(secrets) > 0 {
+		kc := NewAutoRefreshSecretsKeychain(lister, "kyverno", secrets...)
+		kcs = append(kcs, kc)
+	}
+
+	if len(credentialProviders) > 0 {
+		regKcs := KeychainsForProviders(credentialProviders...)
+		kcs = append(kcs, regKcs...)
+	}
+
+	if len(kcs) > 0 {
+		multiKc := authn.NewMultiKeychain(kcs...)
+		ret[2] = remote.WithAuthFromKeychain(multiKc)
+	}
+
+	return ret
+}
+
+func DefaultOpts(localRegistry bool) [3]remote.Option {
+	remoteOpts := [3]remote.Option{}
+
+	remoteOpts[0] = remote.WithTransport(DefaultTransport)
+	remoteOpts[1] = remote.WithUserAgent(KyvernoUserAgent)
+
+	if localRegistry {
+		remoteOpts[2] = remote.WithAuthFromKeychain(authn.DefaultKeychain)
+	} else {
+		remoteOpts[2] = remote.WithAuthFromKeychain(AnonymousKeychain)
+	}
+
+	return remoteOpts
 }
 
 // i probably need to move this to a separate module. it would be more clean
@@ -57,12 +119,12 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 }
 
 // where exactly is the auto refresh in this ?
-func NewAutoRefreshSecretsKeychain(lister corev1listers.SecretLister, defaultNamespace string, imagePullSecrets ...string) (authn.Keychain, error) {
+func NewAutoRefreshSecretsKeychain(lister corev1listers.SecretLister, defaultNamespace string, imagePullSecrets ...string) authn.Keychain {
 	return &autoRefreshSecrets{
 		lister:           lister,
 		defaultNamespace: defaultNamespace,
 		imagePullSecrets: imagePullSecrets,
-	}, nil
+	}
 }
 
 func (kc *autoRefreshSecrets) Resolve(resource authn.Resource) (authn.Authenticator, error) {

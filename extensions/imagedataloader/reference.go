@@ -14,8 +14,9 @@ type ImageReference struct {
 	Digest        string `json:"digest,omitempty"`
 }
 
-func ParseImageReference(image string, options ...Option) (ImageReference, error) {
-	ref, err := name.ParseReference(image, nameOptions(options...)...)
+// we can also discard the options here. all they do is add a name option called insecure or something like this
+func ParseImageReference(image string, nameOpts []name.Option) (ImageReference, error) {
+	ref, err := name.ParseReference(image, nameOpts...)
 	if err != nil {
 		return ImageReference{}, err
 	}

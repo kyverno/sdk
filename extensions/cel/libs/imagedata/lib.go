@@ -7,6 +7,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/ext"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/sdk/extensions/cel/libs/versions"
 	"k8s.io/apimachinery/pkg/util/version"
 )
@@ -18,7 +19,7 @@ type lib struct {
 	version        *version.Version
 }
 
-func Lib(imagedataCtx ContextInterface, v *version.Version) cel.EnvOption {
+func Lib(imagedataCtx ContextInterface, v *version.Version, remoteOptions []remote.Option) cel.EnvOption {
 	if v == nil {
 		panic(libraryName + ": library version must not be nil")
 	}

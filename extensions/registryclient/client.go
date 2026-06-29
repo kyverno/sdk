@@ -3,9 +3,6 @@ package registryclient
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +16,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
-	"sigs.k8s.io/release-utils/version"
 
 	kubernetes "k8s.io/client-go/kubernetes"
 )
@@ -27,24 +23,8 @@ import (
 var (
 	registryClient Client
 
-	once             sync.Once
-	initErr          error
-	userAgent        = fmt.Sprintf("Kyverno/%s (%s; %s)", version.GetVersionInfo().GitVersion, runtime.GOOS, runtime.GOARCH)
-	DefaultTransport = &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			// By default we wrap the transport in retries, so reduce the
-			// default dial timeout to 5s to avoid 5x 30s of connection
-			// timeouts when doing the "ping" on certain http registries.
-			Timeout:   5 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
+	once    sync.Once
+	initErr error
 )
 
 // Return an array of global opts that are going to be the global registry cient's if its
@@ -62,22 +42,8 @@ func GlobalOptsOrDefault(ctx context.Context, localRegistry bool) ([]remote.Opti
 	}
 
 	// there's no registry client, instantiate defaults
-	return DefaultOpts(localRegistry), nil
-}
-
-func DefaultOpts(localRegistry bool) []remote.Option {
-	remoteOpts := []remote.Option{}
-	remoteOpts = append(remoteOpts,
-		remote.WithTransport(DefaultTransport),
-		remote.WithUserAgent(userAgent),
-	)
-
-	if localRegistry {
-		remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(authn.DefaultKeychain))
-	} else {
-		remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(regcreds.AnonymousKeychain))
-	}
-	return remoteOpts
+	ret := regcreds.DefaultOpts(localRegistry)
+	return ret[:], nil
 }
 
 func GetRegistryClient() (Client, error) {
@@ -113,11 +79,7 @@ func SetupGlobalRegistryClient(ctx context.Context,
 		kcs := []authn.Keychain{}
 		// if we have an image pull secrets passed, create a chain that gets auto refreshed on secret updated
 		if imagePullSecrets != "" && len(strings.Split(imagePullSecrets, ",")) > 0 {
-			kc, err := regcreds.NewAutoRefreshSecretsKeychain(secretLister, "kyverno")
-			if err != nil {
-				initErr = err
-				return
-			}
+			kc := regcreds.NewAutoRefreshSecretsKeychain(secretLister, "kyverno")
 			kcs = append(kcs, kc)
 		}
 
@@ -135,9 +97,8 @@ func SetupGlobalRegistryClient(ctx context.Context,
 		}
 
 		c := &client{
-			keychain:              authnKc,
-			transport:             tracing.Transport(DefaultTransport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)),
-			allowInsecureRegistry: allowInsecure,
+			keychain:  authnKc,
+			transport: tracing.Transport(regcreds.DefaultTransport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)), allowInsecureRegistry: allowInsecure,
 		}
 		registryClient = c
 	})
@@ -151,7 +112,7 @@ func (c *client) Options(ctx context.Context) ([]gcrremote.Option, error) {
 		gcrremote.WithAuthFromKeychain(c.keychain),
 		gcrremote.WithTransport(c.transport),
 		gcrremote.WithContext(ctx),
-		gcrremote.WithUserAgent(userAgent),
+		gcrremote.WithUserAgent(regcreds.KyvernoUserAgent),
 	}
 
 	pusher, err := gcrremote.NewPusher(opts...)

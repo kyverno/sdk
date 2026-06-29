@@ -21,11 +21,7 @@ const (
 )
 
 type Fetcher interface {
-	// if we said that the new function is gonna use the default options coming from the global registry client
-	// then when should we use this one ? and at which call sites do we pass non standard options?
-	// there also doesn't seem to be a location where we use this function and pass non standard opts. then what path
-	// does the ivpol with credentials provided on the policy use ?
-	FetchImageData(ctx context.Context, image string, options ...Option) (*ImageData, error)
+	FetchImageData(ctx context.Context, image string, authOpts []remote.Option, nameOpts []name.Option) (*ImageData, error)
 }
 
 type imagedatafetcher struct {
@@ -40,34 +36,30 @@ func New(lister k8scorev1.SecretInterface, remoteOpts []remote.Option) (*imageda
 	}, nil
 }
 
-// who calls this function ? because it does its own option initialization. if passes custom stuff then we can't use the
-// gloabl client.
-// the thing about this, is that its not a constructor.it wont return an idl with custom options. how do we have a solution for when
-// we want to create a long lived image data loader ? thats the image context.. well it needs to be renamed because that name sucks kinda
-func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, options ...Option) (*ImageData, error) {
+func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, authOpts []remote.Option, nameOpts []name.Option) (*ImageData, error) {
 	img := ImageData{
 		referrersData: make(map[string]referrerData),
+		nameOpts:      nameOpts,
 	}
 
-	var err error
-	img.remoteOpts, err = i.remoteOptions(ctx, i.lister, options...)
+	// create the initial set of remote options and add to them the auth options
+	img.remoteOpts = i.remoteOptions(ctx)
+	img.remoteOpts = append(img.remoteOpts, authOpts...)
+
+	imgRef, err := ParseImageReference(image, nameOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	img.ImageReference, err = ParseImageReference(image, options...)
-	if err != nil {
-		return nil, err
-	}
+	img.ImageReference = imgRef
 
-	img.nameOpts = nameOptions(options...)
-	ref, err := name.ParseReference(image, img.nameOpts...)
+	ref, err := name.ParseReference(image, nameOpts...)
 	if err != nil {
 		return nil, err
 	}
 	img.nameRef = ref
 
-	remoteImg, err := remote.Image(ref, img.remoteOpts...)
+	remoteImg, err := remote.Image(ref, authOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +74,7 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, opt
 		return nil, err
 	}
 
-	desc, err := remote.Get(ref, img.remoteOpts...)
+	desc, err := remote.Get(ref, authOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -113,16 +105,10 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, opt
 	return &img, nil
 }
 
-func (i *imagedatafetcher) remoteOptions(ctx context.Context, lister k8scorev1.SecretInterface, options ...Option) ([]remote.Option, error) {
+func (i *imagedatafetcher) remoteOptions(ctx context.Context) []remote.Option {
 	var opts []remote.Option
-	opts = append(opts, i.defaultOptions...)
+	opts = append(opts, i.defaultOptions...) // append the options we created in new
 
-	authOpts, err := makeAuthOptions(nil, options...)
-	if err != nil {
-		return nil, err
-	}
-
-	opts = append(opts, authOpts...)
 	opts = append(opts, remote.WithContext(ctx))
 	opts = append(opts, remote.WithRetryStatusCodes(
 		http.StatusRequestTimeout,
@@ -135,7 +121,7 @@ func (i *imagedatafetcher) remoteOptions(ctx context.Context, lister k8scorev1.S
 		429, // Too Many Requests
 	))
 
-	return opts, nil
+	return opts
 }
 
 type ImageDescriptor struct {
