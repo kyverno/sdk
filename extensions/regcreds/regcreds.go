@@ -19,6 +19,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/google"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/kyverno/api/api/policies.kyverno.io/v1alpha1"
 	"github.com/kyverno/kyverno/pkg/logging"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -59,7 +60,24 @@ type autoRefreshSecrets struct {
 	imagePullSecrets []string
 }
 
-func RemoteOptsFromParams(lister k8scorev1.SecretInterface, secrets, credentialProviders []string, localRegistry, insecure bool) [3]remote.Option {
+func RemoteOptsFromIvpolCredentials(lister k8scorev1.SecretInterface, ivpolCreds v1alpha1.Credentials) ([]remote.Option, []name.Option) {
+	providers := make([]string, len(ivpolCreds.Providers))
+	for _, p := range ivpolCreds.Providers {
+		providers = append(providers, string(p))
+	}
+
+	authOpts := remoteOptsFromParams(lister, ivpolCreds.Secrets,
+		providers, ivpolCreds.AllowInsecureRegistry, ivpolCreds.AllowInsecureRegistry)
+
+	nameOpts := []name.Option{}
+	if ivpolCreds.AllowInsecureRegistry {
+		nameOpts = append(nameOpts, name.Insecure)
+	}
+
+	return authOpts[:], nameOpts
+}
+
+func remoteOptsFromParams(lister k8scorev1.SecretInterface, secrets, credentialProviders []string, localRegistry, insecure bool) [3]remote.Option {
 	ret := DefaultOpts(localRegistry)
 
 	kcs := []authn.Keychain{}
