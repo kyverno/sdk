@@ -25,14 +25,16 @@ type Fetcher interface {
 }
 
 type imagedatafetcher struct {
-	lister         k8scorev1.SecretInterface
-	defaultOptions []remote.Option
+	lister          k8scorev1.SecretInterface
+	defaultOptions  []remote.Option
+	defaultNameOpts []name.Option
 }
 
-func New(lister k8scorev1.SecretInterface, remoteOpts []remote.Option) (*imagedatafetcher, error) {
+func New(lister k8scorev1.SecretInterface, defaultAuthOpts []remote.Option, defaultNameOpts []name.Option) (*imagedatafetcher, error) {
 	return &imagedatafetcher{
-		lister:         lister,
-		defaultOptions: remoteOpts,
+		lister:          lister,
+		defaultOptions:  defaultAuthOpts,
+		defaultNameOpts: defaultNameOpts,
 	}, nil
 }
 
@@ -46,14 +48,17 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	img.remoteOpts = i.remoteOptions(ctx)
 	img.remoteOpts = append(img.remoteOpts, authOpts...)
 
-	imgRef, err := ParseImageReference(image, nameOpts)
+	// same for name options. however there's no default set
+	img.nameOpts = append(img.nameOpts, nameOpts...)
+
+	imgRef, err := ParseImageReference(image, img.nameOpts)
 	if err != nil {
 		return nil, err
 	}
 
 	img.ImageReference = imgRef
 
-	ref, err := name.ParseReference(image, nameOpts...)
+	ref, err := name.ParseReference(image, img.nameOpts...)
 	if err != nil {
 		return nil, err
 	}

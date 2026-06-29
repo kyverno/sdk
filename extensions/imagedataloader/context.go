@@ -29,8 +29,8 @@ type ImageContext interface {
 // Creates an image data loader along with a cache that stores images. Calling .Get
 // on that type performs a read from that cache and fallback to calling the remote if
 // the image was not found
-func NewImageContext(lister k8scorev1.SecretInterface, opts []remote.Option) (ImageContext, error) {
-	idl, err := New(lister, opts)
+func NewImageContext(lister k8scorev1.SecretInterface, opts []remote.Option, nameOpts []name.Option) (ImageContext, error) {
+	idl, err := New(lister, opts, nameOpts)
 	if err != nil {
 		return nil, err
 	}

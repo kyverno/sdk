@@ -23,6 +23,7 @@ func (c *impl) get_imagedata_string(args ...ref.Val) ref.Val {
 	} else {
 		// this accesses the image context. the image context must take externally defined authentication
 		// options. so the libraries constructor needs to take those options during .Lib call
+		// how will the image validating policy pass custom parameters to a function like this ?
 		globalRef, err := self.GetImageData(image, c.authOpts)
 		if err != nil {
 			// Errors are not expected here since Parse is a more lenient parser than ParseRequestURI.
