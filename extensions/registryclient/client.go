@@ -14,10 +14,8 @@ import (
 	"github.com/kyverno/kyverno/pkg/tracing"
 	"github.com/kyverno/sdk/extensions/regcreds"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"k8s.io/client-go/informers"
-	"k8s.io/client-go/tools/cache"
 
-	kubernetes "k8s.io/client-go/kubernetes"
+	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 var (
@@ -61,20 +59,10 @@ func MustRegistryClient() Client {
 }
 
 func SetupGlobalRegistryClient(ctx context.Context,
-	kclient kubernetes.Interface,
+	secretLister k8scorev1.SecretInterface,
 	resyncPeriod time.Duration,
 	imagePullSecrets string, regCredHelpers string, allowInsecure bool) error {
 	once.Do(func() {
-		factory := informers.NewSharedInformerFactory(kclient, 10*time.Minute)
-		secretInformer := factory.Core().V1().Secrets()
-		factory.Start(ctx.Done())
-
-		if !cache.WaitForCacheSync(ctx.Done(), secretInformer.Informer().HasSynced) {
-			initErr = fmt.Errorf("timed out waiting for cache sync")
-			return
-		}
-		secretLister := secretInformer.Lister()
-
 		// create an array of key chains
 		kcs := []authn.Keychain{}
 		// if we have an image pull secrets passed, create a chain that gets auto refreshed on secret updated

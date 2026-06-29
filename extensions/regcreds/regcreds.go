@@ -21,7 +21,9 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/kyverno/pkg/logging"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1listers "k8s.io/client-go/listers/core/v1"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"sigs.k8s.io/release-utils/version"
 
 	kauth "github.com/google/go-containerregistry/pkg/authn/kubernetes"
@@ -52,14 +54,12 @@ var (
 )
 
 type autoRefreshSecrets struct {
-	lister           corev1listers.SecretLister
+	lister           k8scorev1.SecretInterface
 	defaultNamespace string
 	imagePullSecrets []string
 }
 
-// credential providers, secrets -> get combined into one option
-// local registry -> gets combined into the same option
-func RemoteOptsFromParams(lister corev1listers.SecretLister, secrets, credentialProviders []string, localRegistry, insecure bool) [3]remote.Option {
+func RemoteOptsFromParams(lister k8scorev1.SecretInterface, secrets, credentialProviders []string, localRegistry, insecure bool) [3]remote.Option {
 	ret := DefaultOpts(localRegistry)
 
 	kcs := []authn.Keychain{}
@@ -119,7 +119,7 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 }
 
 // where exactly is the auto refresh in this ?
-func NewAutoRefreshSecretsKeychain(lister corev1listers.SecretLister, defaultNamespace string, imagePullSecrets ...string) authn.Keychain {
+func NewAutoRefreshSecretsKeychain(lister k8scorev1.SecretInterface, defaultNamespace string, imagePullSecrets ...string) authn.Keychain {
 	return &autoRefreshSecrets{
 		lister:           lister,
 		defaultNamespace: defaultNamespace,
@@ -137,12 +137,12 @@ func (kc *autoRefreshSecrets) Resolve(resource authn.Resource) (authn.Authentica
 
 // generateKeychainForPullSecrets generates keychain by fetching secrets data from imagePullSecrets.
 // Supports namespace/name notation for secrets in any namespace.
-func generateKeychainForPullSecrets(lister corev1listers.SecretLister, defaultNamespace string, imagePullSecrets ...string) (authn.Keychain, error) {
+func generateKeychainForPullSecrets(lister k8scorev1.SecretInterface, defaultNamespace string, imagePullSecrets ...string) (authn.Keychain, error) {
 	var secrets []corev1.Secret
 	// for each secret
 	for _, imagePullSecret := range imagePullSecrets {
 		namespace, name := parseSecretReference(imagePullSecret, defaultNamespace)
-		secret, err := lister.Secrets(namespace).Get(name)
+		secret, err := lister.Get(context.Background(), name, metav1.GetOptions{})
 		if err == nil {
 			secrets = append(secrets, *secret)
 		} else if !k8serrors.IsNotFound(err) {
