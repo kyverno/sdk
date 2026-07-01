@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/api/api/policies.kyverno.io/v1beta1"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
 const (
