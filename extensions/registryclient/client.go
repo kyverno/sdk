@@ -13,6 +13,7 @@ import (
 	"github.com/kyverno/kyverno/pkg/tracing"
 	"github.com/kyverno/sdk/extensions/regcreds"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
 var (
