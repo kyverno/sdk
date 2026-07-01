@@ -56,10 +56,11 @@ func MustRegistryClient() Client {
 }
 
 func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultNamespace string,
-	imagePullSecrets string, regCredHelpers string, allowInsecure bool) {
+	imagePullSecrets string, regCredHelpers string, allowInsecure bool) Client {
 	once.Do(func() {
 		registryClient = New(secretLister, defaultNamespace, imagePullSecrets, regCredHelpers, allowInsecure)
 	})
+	return registryClient
 }
 
 func New(secretLister corev1listers.SecretLister, defaultNamespace string,
