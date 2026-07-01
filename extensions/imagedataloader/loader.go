@@ -12,7 +12,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/api/api/policies.kyverno.io/v1beta1"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 const (
@@ -25,12 +24,12 @@ type Fetcher interface {
 }
 
 type imagedatafetcher struct {
-	lister          k8scorev1.SecretInterface
+	lister          corev1listers.SecretLister
 	defaultOptions  []remote.Option
 	defaultNameOpts []name.Option
 }
 
-func New(lister k8scorev1.SecretInterface, defaultAuthOpts []remote.Option, defaultNameOpts []name.Option) (*imagedatafetcher, error) {
+func New(lister corev1listers.SecretLister, defaultAuthOpts []remote.Option, defaultNameOpts []name.Option) (*imagedatafetcher, error) {
 	return &imagedatafetcher{
 		lister:          lister,
 		defaultOptions:  defaultAuthOpts,

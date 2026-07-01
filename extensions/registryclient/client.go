@@ -13,8 +13,6 @@ import (
 	"github.com/kyverno/kyverno/pkg/tracing"
 	"github.com/kyverno/sdk/extensions/regcreds"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
-	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 var (
@@ -56,14 +54,14 @@ func MustRegistryClient() Client {
 	return registryClient
 }
 
-func SetupGlobalRegistryClient(secretLister k8scorev1.SecretInterface, defaultNamespace string,
+func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultNamespace string,
 	imagePullSecrets string, regCredHelpers string, allowInsecure bool) {
 	once.Do(func() {
 		registryClient = New(secretLister, defaultNamespace, imagePullSecrets, regCredHelpers, allowInsecure)
 	})
 }
 
-func New(secretLister k8scorev1.SecretInterface, defaultNamespace string,
+func New(secretLister corev1listers.SecretLister, defaultNamespace string,
 	imagePullSecrets string, regCredHelpers string, allowInsecure bool) Client {
 	// create an array of key chains
 	kcs := []authn.Keychain{}

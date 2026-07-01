@@ -7,7 +7,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"golang.org/x/sync/errgroup"
-	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 type imageContext struct {
@@ -29,7 +28,7 @@ type ImageContext interface {
 // Creates an image data loader along with a cache that stores images. Calling .Get
 // on that type performs a read from that cache and fallback to calling the remote if
 // the image was not found
-func NewImageContext(lister k8scorev1.SecretInterface, opts []remote.Option, nameOpts []name.Option) (ImageContext, error) {
+func NewImageContext(lister corev1listers.SecretLister, opts []remote.Option, nameOpts []name.Option) (ImageContext, error) {
 	idl, err := New(lister, opts, nameOpts)
 	if err != nil {
 		return nil, err

@@ -23,8 +23,7 @@ import (
 	"github.com/kyverno/kyverno/pkg/logging"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"sigs.k8s.io/release-utils/version"
 
 	kauth "github.com/google/go-containerregistry/pkg/authn/kubernetes"
@@ -54,12 +53,12 @@ var (
 )
 
 type autoRefreshSecrets struct {
-	lister           k8scorev1.SecretInterface
+	lister           corev1listers.SecretLister
 	defaultNamespace string
 	imagePullSecrets []string
 }
 
-func RemoteOptsFromIvpolCredentials(lister k8scorev1.SecretInterface, ivpolCreds v1alpha1.Credentials, defaultNamespace string) ([]remote.Option, []name.Option) {
+func RemoteOptsFromIvpolCredentials(lister corev1listers.SecretLister, ivpolCreds v1alpha1.Credentials, defaultNamespace string) ([]remote.Option, []name.Option) {
 	providers := make([]string, len(ivpolCreds.Providers))
 	for _, p := range ivpolCreds.Providers {
 		providers = append(providers, string(p))
@@ -75,7 +74,7 @@ func RemoteOptsFromIvpolCredentials(lister k8scorev1.SecretInterface, ivpolCreds
 	return authOpts[:], nameOpts
 }
 
-func remoteOptsFromParams(lister k8scorev1.SecretInterface, defaultNamespace string, secrets, credentialProviders []string) [3]remote.Option {
+func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace string, secrets, credentialProviders []string) [3]remote.Option {
 	ret := DefaultOpts()
 
 	kcs := []authn.Keychain{}
@@ -129,7 +128,7 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 	return chains
 }
 
-func NewSecretsKeychain(lister k8scorev1.SecretInterface, defaultNamespace string, imagePullSecrets ...string) authn.Keychain {
+func NewSecretsKeychain(lister corev1listers.SecretLister, defaultNamespace string, imagePullSecrets ...string) authn.Keychain {
 	return &autoRefreshSecrets{
 		lister:           lister,
 		defaultNamespace: defaultNamespace,
@@ -147,12 +146,12 @@ func (kc *autoRefreshSecrets) Resolve(resource authn.Resource) (authn.Authentica
 
 // generateKeychainForPullSecrets generates keychain by fetching secrets data from imagePullSecrets.
 // Supports namespace/name notation for secrets in any namespace.
-func generateKeychainForPullSecrets(lister k8scorev1.SecretInterface, defaultNamespace string, imagePullSecrets ...string) (authn.Keychain, error) {
+func generateKeychainForPullSecrets(lister corev1listers.SecretLister, defaultNamespace string, imagePullSecrets ...string) (authn.Keychain, error) {
 	var secrets []corev1.Secret
 	// for each secret
 	for _, imagePullSecret := range imagePullSecrets {
 		namespace, name := parseSecretReference(imagePullSecret, defaultNamespace)
-		secret, err := lister.Get(context.Background(), name, metav1.GetOptions{})
+		secret, err := lister.Secrets(namespace).Get(name)
 		if err == nil {
 			secrets = append(secrets, *secret)
 		} else if !k8serrors.IsNotFound(err) {
