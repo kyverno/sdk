@@ -7,6 +7,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"golang.org/x/sync/errgroup"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
 type imageContext struct {
