@@ -33,8 +33,7 @@ import (
 )
 
 var (
-	AnonymousKeychain authn.Keychain = anonymousKeyChain{}
-	azureKeychain     authn.Keychain = azureKeyChain{}
+	azureKeychain authn.Keychain = azureKeyChain{}
 
 	KyvernoUserAgent = fmt.Sprintf("Kyverno/%s (%s; %s)", version.GetVersionInfo().GitVersion, runtime.GOOS, runtime.GOARCH)
 	DefaultTransport = &http.Transport{
@@ -66,8 +65,7 @@ func RemoteOptsFromIvpolCredentials(lister k8scorev1.SecretInterface, ivpolCreds
 		providers = append(providers, string(p))
 	}
 
-	authOpts := remoteOptsFromParams(lister, ivpolCreds.Secrets,
-		providers, ivpolCreds.AllowInsecureRegistry, ivpolCreds.AllowInsecureRegistry)
+	authOpts := remoteOptsFromParams(lister, ivpolCreds.Secrets, providers)
 
 	nameOpts := []name.Option{}
 	if ivpolCreds.AllowInsecureRegistry {
@@ -77,12 +75,12 @@ func RemoteOptsFromIvpolCredentials(lister k8scorev1.SecretInterface, ivpolCreds
 	return authOpts[:], nameOpts
 }
 
-func remoteOptsFromParams(lister k8scorev1.SecretInterface, secrets, credentialProviders []string, localRegistry, insecure bool) [3]remote.Option {
-	ret := DefaultOpts(localRegistry)
+func remoteOptsFromParams(lister k8scorev1.SecretInterface, secrets, credentialProviders []string) [3]remote.Option {
+	ret := DefaultOpts()
 
 	kcs := []authn.Keychain{}
 	if len(secrets) > 0 {
-		kc := NewAutoRefreshSecretsKeychain(lister, "kyverno", secrets...)
+		kc := NewSecretsKeychain(lister, "kyverno", secrets...)
 		kcs = append(kcs, kc)
 	}
 
@@ -99,22 +97,17 @@ func remoteOptsFromParams(lister k8scorev1.SecretInterface, secrets, credentialP
 	return ret
 }
 
-func DefaultOpts(localRegistry bool) [3]remote.Option {
+func DefaultOpts() [3]remote.Option {
 	remoteOpts := [3]remote.Option{}
 
 	remoteOpts[0] = remote.WithTransport(DefaultTransport)
 	remoteOpts[1] = remote.WithUserAgent(KyvernoUserAgent)
-
-	if localRegistry {
-		remoteOpts[2] = remote.WithAuthFromKeychain(authn.DefaultKeychain)
-	} else {
-		remoteOpts[2] = remote.WithAuthFromKeychain(AnonymousKeychain)
-	}
+	// look for credential helpers in ~/.docker/config.json on the filesystem, or fall back to anonymous
+	remoteOpts[2] = remote.WithAuthFromKeychain(authn.DefaultKeychain)
 
 	return remoteOpts
 }
 
-// i probably need to move this to a separate module. it would be more clean
 func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 	var chains []authn.Keychain
 	helpers := sets.New(credentialProviders...)
@@ -136,8 +129,7 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 	return chains
 }
 
-// where exactly is the auto refresh in this ?
-func NewAutoRefreshSecretsKeychain(lister k8scorev1.SecretInterface, defaultNamespace string, imagePullSecrets ...string) authn.Keychain {
+func NewSecretsKeychain(lister k8scorev1.SecretInterface, defaultNamespace string, imagePullSecrets ...string) authn.Keychain {
 	return &autoRefreshSecrets{
 		lister:           lister,
 		defaultNamespace: defaultNamespace,
@@ -184,12 +176,6 @@ func parseSecretReference(secretRef string, defaultNamespace string) (namespace 
 	}
 	// otherwise return the default namespace and the secret ref with the leading slash removed
 	return defaultNamespace, secretRef
-}
-
-type anonymousKeyChain struct{}
-
-func (anonymousKeyChain) Resolve(_ authn.Resource) (authn.Authenticator, error) {
-	return authn.Anonymous, nil
 }
 
 type azureKeyChain struct{}

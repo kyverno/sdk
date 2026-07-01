@@ -22,7 +22,7 @@ type lib struct {
 
 // Initialize the imagedata library. imagedataCtx argument is whatever implements the methods for interacting with
 // an externl image registry. authOpts is the custom authentication options (secret references, allow insecure)
-// that get passed during making a call to that remote.
+// that get passed during making a call to that remote which is an image validating policy only feature.
 func Lib(imagedataCtx ContextInterface, v *version.Version, authOpts []remote.Option) cel.EnvOption {
 	if v == nil {
 		panic(libraryName + ": library version must not be nil")

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -21,8 +20,7 @@ import (
 var (
 	registryClient Client
 
-	once    sync.Once
-	initErr error
+	once sync.Once
 )
 
 // Return an array of global opts that are going to be the global registry cient's if its
@@ -30,7 +28,7 @@ var (
 // the creation of options makes a cancellable call, but beecause there's a WithContext
 // remote option that gets initialized. So the caller must pass their own inherited context
 // or construct a new one to be used for the call to the remote registry
-func GlobalOptsOrDefault(ctx context.Context, localRegistry bool) ([]remote.Option, []name.Option, error) {
+func GlobalOptsOrDefault(ctx context.Context) ([]remote.Option, []name.Option, error) {
 	if registryClient != nil {
 		opts, nameOpts, err := registryClient.Options(ctx)
 		if err != nil {
@@ -40,7 +38,7 @@ func GlobalOptsOrDefault(ctx context.Context, localRegistry bool) ([]remote.Opti
 	}
 
 	// there's no registry client, instantiate defaults
-	ret := regcreds.DefaultOpts(localRegistry)
+	ret := regcreds.DefaultOpts()
 	return ret[:], nil, nil
 }
 
@@ -58,40 +56,41 @@ func MustRegistryClient() Client {
 	return registryClient
 }
 
-func SetupGlobalRegistryClient(ctx context.Context,
-	secretLister k8scorev1.SecretInterface,
-	resyncPeriod time.Duration,
-	imagePullSecrets string, regCredHelpers string, allowInsecure bool) error {
+func SetupGlobalRegistryClient(secretLister k8scorev1.SecretInterface, defaultNamespace string,
+	imagePullSecrets string, regCredHelpers string, allowInsecure bool) {
 	once.Do(func() {
-		// create an array of key chains
-		kcs := []authn.Keychain{}
-		// if we have an image pull secrets passed, create a chain that gets auto refreshed on secret updated
-		if imagePullSecrets != "" && len(strings.Split(imagePullSecrets, ",")) > 0 {
-			kc := regcreds.NewAutoRefreshSecretsKeychain(secretLister, "kyverno")
-			kcs = append(kcs, kc)
-		}
-
-		credHelpers := strings.Split(regCredHelpers, ",")
-		if len(credHelpers) > 0 && regCredHelpers != "" {
-			regkc := regcreds.KeychainsForProviders(credHelpers...)
-			kcs = append(kcs, regkc...)
-		}
-
-		var authnKc authn.Keychain
-		if len(kcs) > 0 {
-			authnKc = authn.NewMultiKeychain(kcs...)
-		} else {
-			authnKc = authn.NewMultiKeychain(regcreds.AnonymousKeychain)
-		}
-
-		c := &client{
-			allowInsecureRegistry: allowInsecure,
-			keychain:              authnKc,
-			transport:             tracing.Transport(regcreds.DefaultTransport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)),
-		}
-		registryClient = c
+		registryClient = New(secretLister, defaultNamespace, imagePullSecrets, regCredHelpers, allowInsecure)
 	})
-	return initErr
+}
+
+func New(secretLister k8scorev1.SecretInterface, defaultNamespace string,
+	imagePullSecrets string, regCredHelpers string, allowInsecure bool) Client {
+	// create an array of key chains
+	kcs := []authn.Keychain{}
+	if imagePullSecrets != "" && len(strings.Split(imagePullSecrets, ",")) > 0 {
+		kc := regcreds.NewSecretsKeychain(secretLister, defaultNamespace)
+		kcs = append(kcs, kc)
+	}
+
+	credHelpers := strings.Split(regCredHelpers, ",")
+	if len(credHelpers) > 0 && regCredHelpers != "" {
+		regkc := regcreds.KeychainsForProviders(credHelpers...)
+		kcs = append(kcs, regkc...)
+	}
+
+	var authnKc authn.Keychain
+	if len(kcs) > 0 {
+		authnKc = authn.NewMultiKeychain(kcs...)
+	} else {
+		authnKc = authn.DefaultKeychain
+	}
+
+	c := &client{
+		allowInsecureRegistry: allowInsecure,
+		keychain:              authnKc,
+		transport:             tracing.Transport(regcreds.DefaultTransport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)),
+	}
+	return c
 }
 
 // Options returns remote.Option config parameters for the client
