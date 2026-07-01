@@ -59,13 +59,13 @@ type autoRefreshSecrets struct {
 	imagePullSecrets []string
 }
 
-func RemoteOptsFromIvpolCredentials(lister k8scorev1.SecretInterface, ivpolCreds v1alpha1.Credentials) ([]remote.Option, []name.Option) {
+func RemoteOptsFromIvpolCredentials(lister k8scorev1.SecretInterface, ivpolCreds v1alpha1.Credentials, defaultNamespace string) ([]remote.Option, []name.Option) {
 	providers := make([]string, len(ivpolCreds.Providers))
 	for _, p := range ivpolCreds.Providers {
 		providers = append(providers, string(p))
 	}
 
-	authOpts := remoteOptsFromParams(lister, ivpolCreds.Secrets, providers)
+	authOpts := remoteOptsFromParams(lister, defaultNamespace, ivpolCreds.Secrets, providers)
 
 	nameOpts := []name.Option{}
 	if ivpolCreds.AllowInsecureRegistry {
@@ -75,12 +75,12 @@ func RemoteOptsFromIvpolCredentials(lister k8scorev1.SecretInterface, ivpolCreds
 	return authOpts[:], nameOpts
 }
 
-func remoteOptsFromParams(lister k8scorev1.SecretInterface, secrets, credentialProviders []string) [3]remote.Option {
+func remoteOptsFromParams(lister k8scorev1.SecretInterface, defaultNamespace string, secrets, credentialProviders []string) [3]remote.Option {
 	ret := DefaultOpts()
 
 	kcs := []authn.Keychain{}
 	if len(secrets) > 0 {
-		kc := NewSecretsKeychain(lister, "kyverno", secrets...)
+		kc := NewSecretsKeychain(lister, defaultNamespace, secrets...)
 		kcs = append(kcs, kc)
 	}
 
