@@ -33,7 +33,7 @@ import (
 )
 
 var (
-	azureKeychain authn.Keychain = azureKeyChain{}
+	AzureKeychain authn.Keychain = azureKeyChain{}
 
 	KyvernoUserAgent = fmt.Sprintf("Kyverno/%s (%s; %s)", version.GetVersionInfo().GitVersion, runtime.GOOS, runtime.GOARCH)
 	DefaultTransport = &http.Transport{
@@ -121,7 +121,7 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 		chains = append(chains, authn.NewKeychainFromHelper(ecr.NewECRHelper(ecr.WithLogger(io.Discard))))
 	}
 	if helpers.Has("azure") {
-		chains = append(chains, azureKeychain)
+		chains = append(chains, AzureKeychain)
 	}
 	if helpers.Has("github") {
 		chains = append(chains, github.Keychain)
