@@ -21,11 +21,9 @@ var (
 	once sync.Once
 )
 
-// Return an array of global opts that are going to be the global registry cient's if its
-// inialized, otherwise some sane defaults. This function takes in a context not because
-// the creation of options makes a cancellable call, but beecause there's a WithContext
-// remote option that gets initialized. So the caller must pass their own inherited context
-// or construct a new one to be used for the call to the remote registry
+// GlobalOptsOrDefault returns the global registry client's options if it has been initialized,
+// otherwise it returns sane defaults. The context is used to initialize remote.WithContext,
+// so callers should pass the request context (or a derived one) for remote registry calls.
 func GlobalOptsOrDefault(ctx context.Context) ([]gcrremote.Option, []name.Option, error) {
 	if registryClient != nil {
 		opts, nameOpts, err := registryClient.Options(ctx)
@@ -37,8 +35,8 @@ func GlobalOptsOrDefault(ctx context.Context) ([]gcrremote.Option, []name.Option
 
 	// there's no registry client, instantiate defaults
 	ret := regcreds.DefaultOpts()
-	return ret[:], nil, nil
-}
+	opts := append(ret[:], gcrremote.WithContext(ctx))
+	return opts, []name.Option{}, nil
 
 func GetRegistryClient() (Client, error) {
 	if registryClient == nil {

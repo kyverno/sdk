@@ -59,7 +59,7 @@ type autoRefreshSecrets struct {
 }
 
 func RemoteOptsFromIvpolCredentials(lister corev1listers.SecretLister, ivpolCreds v1alpha1.Credentials, defaultNamespace string) ([]remote.Option, []name.Option) {
-	providers := make([]string, len(ivpolCreds.Providers))
+	providers := make([]string, 0, len(ivpolCreds.Providers))
 	for _, p := range ivpolCreds.Providers {
 		providers = append(providers, string(p))
 	}
