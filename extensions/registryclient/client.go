@@ -24,19 +24,18 @@ var (
 // GlobalOptsOrDefault returns the global registry client's options if it has been initialized,
 // otherwise it returns sane defaults. The context is used to initialize remote.WithContext,
 // so callers should pass the request context (or a derived one) for remote registry calls.
-func GlobalOptsOrDefault(ctx context.Context) ([]gcrremote.Option, []name.Option, error) {
+func GlobalOptsOrDefault(ctx context.Context) ([]gcrremote.Option, []name.Option) {
 	if registryClient != nil {
-		opts, nameOpts, err := registryClient.Options(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		return opts, nameOpts, nil
+		rc := registryClient.(*client)
+		opts, nameOpts := rc.optionsWithoutPuller(ctx)
+		return opts, nameOpts
 	}
 
 	// there's no registry client, instantiate defaults
 	ret := regcreds.DefaultOpts()
 	opts := append(ret[:], gcrremote.WithContext(ctx))
-	return opts, []name.Option{}, nil
+	return opts, []name.Option{}
+}
 
 func GetRegistryClient() (Client, error) {
 	if registryClient == nil {
@@ -91,15 +90,26 @@ func New(secretLister corev1listers.SecretLister, defaultNamespace string,
 	return c
 }
 
-// Options returns remote.Option config parameters for the client
-// these options get passed to remote.Get
-func (c *client) Options(ctx context.Context) ([]gcrremote.Option, []name.Option, error) {
+// In some scenarios, we don't want to rely on the puller and pusher that have been created by the registry
+// client and want to instantiate our own from the credentials we have.
+func (c *client) optionsWithoutPuller(ctx context.Context) ([]gcrremote.Option, []name.Option) {
 	opts := []gcrremote.Option{
 		gcrremote.WithAuthFromKeychain(c.keychain),
 		gcrremote.WithTransport(c.transport),
 		gcrremote.WithContext(ctx),
 		gcrremote.WithUserAgent(regcreds.KyvernoUserAgent),
 	}
+
+	nameOpts := []name.Option{}
+	if c.allowInsecureRegistry {
+		nameOpts = append(nameOpts, name.Insecure)
+	}
+	return opts, nameOpts
+}
+
+// Options returns remote.Option config parameters for the client these options get passed to remote.Get
+func (c *client) Options(ctx context.Context) ([]gcrremote.Option, []name.Option, error) {
+	opts, nameOpts := c.optionsWithoutPuller(ctx)
 
 	pusher, err := gcrremote.NewPusher(opts...)
 	if err != nil {
@@ -112,10 +122,6 @@ func (c *client) Options(ctx context.Context) ([]gcrremote.Option, []name.Option
 		return nil, nil, err
 	}
 	opts = append(opts, gcrremote.Reuse(puller))
-	nameOpts := []name.Option{}
-	if c.allowInsecureRegistry {
-		nameOpts = append(nameOpts, name.Insecure)
-	}
 
 	return opts, nameOpts, nil
 }

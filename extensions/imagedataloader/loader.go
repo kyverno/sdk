@@ -48,9 +48,6 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	img.remoteOpts = i.remoteOptions(ctx)
 	img.remoteOpts = append(img.remoteOpts, authOpts...)
 
-	// same for name options. however there's no default set
-	img.nameOpts = append(img.nameOpts, nameOpts...)
-
 	imgRef, err := ParseImageReference(image, img.nameOpts)
 	if err != nil {
 		return nil, err
@@ -64,7 +61,7 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	}
 	img.nameRef = ref
 
-	remoteImg, err := remote.Image(ref, authOpts...)
+	remoteImg, err := remote.Image(ref, img.remoteOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +76,7 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 		return nil, err
 	}
 
-	desc, err := remote.Get(ref, authOpts...)
+	desc, err := remote.Get(ref, img.remoteOpts...)
 	if err != nil {
 		return nil, err
 	}

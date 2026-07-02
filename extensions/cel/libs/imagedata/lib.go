@@ -59,7 +59,8 @@ func (l *lib) ProgramOptions() []cel.ProgramOption {
 
 func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 	impl := impl{
-		Adapter: env.CELTypeAdapter(),
+		Adapter:  env.CELTypeAdapter(),
+		authOpts: c.authOpts,
 	}
 	buildGetMetadataOverloads := func(suffix string) []cel.FunctionOpt {
 		return []cel.FunctionOpt{

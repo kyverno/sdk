@@ -181,7 +181,7 @@ type azureKeyChain struct{}
 
 func (azureKeyChain) Resolve(resource authn.Resource) (authn.Authenticator, error) {
 	if !isACRRegistry(resource.RegistryStr()) {
-		return authn.Anonymous, fmt.Errorf("expected an azure registry")
+		return authn.Anonymous, nil
 	}
 
 	ref, err := name.ParseReference(resource.String())
