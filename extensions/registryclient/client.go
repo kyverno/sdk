@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/google/go-containerregistry/pkg/v1/remote"
 	gcrremote "github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/kyverno/pkg/tracing"
 	"github.com/kyverno/sdk/extensions/regcreds"
@@ -27,7 +26,7 @@ var (
 // the creation of options makes a cancellable call, but beecause there's a WithContext
 // remote option that gets initialized. So the caller must pass their own inherited context
 // or construct a new one to be used for the call to the remote registry
-func GlobalOptsOrDefault(ctx context.Context) ([]remote.Option, []name.Option, error) {
+func GlobalOptsOrDefault(ctx context.Context) ([]gcrremote.Option, []name.Option, error) {
 	if registryClient != nil {
 		opts, nameOpts, err := registryClient.Options(ctx)
 		if err != nil {
