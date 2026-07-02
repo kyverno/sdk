@@ -66,8 +66,9 @@ func New(secretLister corev1listers.SecretLister, defaultNamespace string,
 	imagePullSecrets string, regCredHelpers string, allowInsecure bool) Client {
 	// create an array of key chains
 	kcs := []authn.Keychain{}
-	if imagePullSecrets != "" && len(strings.Split(imagePullSecrets, ",")) > 0 {
-		kc := regcreds.NewSecretsKeychain(secretLister, defaultNamespace)
+	if imagePullSecrets != "" {
+		secrets := strings.Split(imagePullSecrets, ",")
+		kc := regcreds.NewSecretsKeychain(secretLister, defaultNamespace, secrets...)
 		kcs = append(kcs, kc)
 	}
 
