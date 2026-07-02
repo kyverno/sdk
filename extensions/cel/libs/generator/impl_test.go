@@ -56,14 +56,16 @@ generator.apply(
 	assert.NoError(t, err)
 }
 
-func Test_apply_namespaced_cross_namespace_denied(t *testing.T) {
+func Test_apply_namespaced_no_namespace_arg(t *testing.T) {
 	base, err := compiler.NewBaseEnv()
 	assert.NoError(t, err)
 
 	called := false
+	var capturedNS string
 	ctx := Context{&ContextMock{
 		GenerateResourcesFunc: func(namespace string, dataList []map[string]any) error {
 			called = true
+			capturedNS = namespace
 			return nil
 		},
 	}}
@@ -73,23 +75,19 @@ func Test_apply_namespaced_cross_namespace_denied(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	// cross-namespace call must be rejected
-	ast, issues := env.Compile(`generator.apply("kube-system", [{"apiVersion": dyn("v1"), "kind": dyn("ConfigMap")}])`)
+	// cross-namespace call must not compile — namespace arg not accepted in namespaced policies
+	_, issues := env.Compile(`generator.apply("kube-system", [{"apiVersion": dyn("v1"), "kind": dyn("ConfigMap")}])`)
+	assert.NotNil(t, issues, "namespace arg must not be accepted in a namespaced policy")
+
+	// correct call: no namespace arg — policy namespace is used automatically
+	ast, issues := env.Compile(`generator.apply([{"apiVersion": dyn("v1"), "kind": dyn("ConfigMap")}])`)
 	assert.Nil(t, issues)
 	prog, err := env.Program(ast)
 	assert.NoError(t, err)
 	_, _, err = prog.Eval(map[string]any{})
-	assert.ErrorContains(t, err, "cross-namespace generation denied")
-	assert.False(t, called, "GenerateResources must not be called on cross-namespace attempt")
-
-	// same-namespace call must succeed
-	ast, issues = env.Compile(`generator.apply("tenant-ns", [{"apiVersion": dyn("v1"), "kind": dyn("ConfigMap")}])`)
-	assert.Nil(t, issues)
-	prog, err = env.Program(ast)
 	assert.NoError(t, err)
-	_, _, err = prog.Eval(map[string]any{})
-	assert.NoError(t, err)
-	assert.True(t, called, "GenerateResources must be called for same-namespace generation")
+	assert.True(t, called)
+	assert.Equal(t, "tenant-ns", capturedNS, "GenerateResources must receive the policy's own namespace")
 }
 
 func Test_apply_generator_string_list_error(t *testing.T) {

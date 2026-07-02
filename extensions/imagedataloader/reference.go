@@ -14,8 +14,8 @@ type ImageReference struct {
 	Digest        string `json:"digest,omitempty"`
 }
 
-func ParseImageReference(image string, options ...Option) (ImageReference, error) {
-	ref, err := name.ParseReference(image, nameOptions(options...)...)
+func ParseImageReference(image string, nameOpts []name.Option) (ImageReference, error) {
+	ref, err := name.ParseReference(image, nameOpts...)
 	if err != nil {
 		return ImageReference{}, err
 	}

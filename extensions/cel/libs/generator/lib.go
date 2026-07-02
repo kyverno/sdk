@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
 	"github.com/kyverno/sdk/extensions/cel/libs/versions"
 	"k8s.io/apimachinery/pkg/util/version"
@@ -55,22 +54,46 @@ func (l *lib) ProgramOptions() []cel.ProgramOption {
 }
 
 func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
-	var binding func(args ...ref.Val) ref.Val
 	if c.namespace != "" {
-		ni := namespacedImpl{namespace: c.namespace, Adapter: env.CELTypeAdapter()}
-		binding = ni.apply_generator_string_list
-	} else {
-		ci := impl{Adapter: env.CELTypeAdapter()}
-		binding = ci.apply_generator_string_list
+		return c.namespacedEnv(env)
 	}
+	return c.clusterEnv(env)
+}
 
+func (c *lib) clusterEnv(env *cel.Env) (*cel.Env, error) {
+	ci := impl{Adapter: env.CELTypeAdapter()}
 	buildApplyOverloads := func(suffix string) []cel.FunctionOpt {
 		return []cel.FunctionOpt{
 			cel.MemberOverload(
 				fmt.Sprintf("generator_apply_string_list_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.NewListType(types.NewMapType(types.StringType, types.AnyType))},
 				types.BoolType,
-				cel.FunctionBinding(binding),
+				cel.FunctionBinding(ci.apply_generator_string_list),
+			),
+		}
+	}
+	libraryDecls := map[string][]cel.FunctionOpt{
+		"Apply": buildApplyOverloads("pascal"),
+	}
+	if c.version.AtLeast(version.MajorMinor(1, 18)) {
+		libraryDecls["apply"] = buildApplyOverloads("camel")
+	}
+	options := []cel.EnvOption{}
+	for name, overloads := range libraryDecls {
+		options = append(options, cel.Function(name, overloads...))
+	}
+	return env.Extend(options...)
+}
+
+func (c *lib) namespacedEnv(env *cel.Env) (*cel.Env, error) {
+	ni := namespacedImpl{namespace: c.namespace, Adapter: env.CELTypeAdapter()}
+	buildApplyOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
+			cel.MemberOverload(
+				fmt.Sprintf("generator_apply_list_%s", suffix),
+				[]*cel.Type{ContextType, types.NewListType(types.NewMapType(types.StringType, types.AnyType))},
+				types.BoolType,
+				cel.FunctionBinding(ni.apply_generator_list),
 			),
 		}
 	}
