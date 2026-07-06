@@ -1,6 +1,7 @@
 package json
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -8,6 +9,9 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/extensions/cel/utils"
 )
+
+// errUnhandledType is returned when a handler cannot process the value.
+var errUnhandledType = errors.New("unhandled type")
 
 type impl struct {
 	types.Adapter
@@ -44,6 +48,23 @@ func (i *impl) marshal(jsonObj ref.Val, value ref.Val) ref.Val {
 // toJsonNative converts a CEL ref.Val to a native Go value
 // suitable for JSON marshaling (map, list, or primitive).
 func toJsonNative(value any) (any, error) {
+	// Handle ref.Val types first
+	if result, err := handleRefVal(value); err != errUnhandledType {
+		return result, err
+	}
+
+	// Handle known concrete types with fast paths
+	if result, err := handleKnownTypes(value); err != errUnhandledType {
+		return result, err
+	}
+
+	// Fallback: use reflection for truly unknown types
+	return handleUnknownTypes(value)
+}
+
+// handleRefVal handles conversion of ref.Val types (CEL values).
+// Returns errUnhandledType if the value is not a ref.Val.
+func handleRefVal(value any) (any, error) {
 	if v, ok := value.(ref.Val); ok {
 		switch v.Type() {
 		case types.NullType:
@@ -63,15 +84,23 @@ func toJsonNative(value any) (any, error) {
 		}
 		return toJsonNative(v.Value())
 	}
+	return nil, errUnhandledType
+}
 
-	// Fast paths for the most common concrete types — avoids reflect overhead.
+// handleKnownTypes handles common concrete types with fast paths.
+// Returns errUnhandledType if the value is not a known type.
+func handleKnownTypes(value any) (any, error) {
 	switch v := value.(type) {
 	case nil:
 		return nil, nil
 	case bool, string,
 		int, int8, int16, int32, int64,
 		uint, uint8, uint16, uint32, uint64, uintptr,
-		float32, float64:
+		float32, float64,
+		[]bool, []string,
+		[]int, []int8, []int16, []int32, []int64,
+		[]uint, []byte, []uint16, []uint32, []uint64, []uintptr,
+		[]float32, []float64:
 		return v, nil
 	case map[string]any:
 		ret := make(map[string]any, len(v))
@@ -93,11 +122,16 @@ func toJsonNative(value any) (any, error) {
 			ret[i] = converted
 		}
 		return ret, nil
-	case []byte:
-		return v, nil
 	}
+	return nil, errUnhandledType
+}
 
-	// Fallback: use reflection for truly unknown types.
+// handleUnknownTypes handles unknown types using reflection.
+// For example:
+//   - Native primitives or slice types not listed in fast path
+//   - Map keys that are not strings
+//   - Aliases and custom types wrapped in ref.Val
+func handleUnknownTypes(value any) (any, error) {
 	rv := reflect.ValueOf(value)
 	switch rv.Kind() {
 	case reflect.Invalid:
