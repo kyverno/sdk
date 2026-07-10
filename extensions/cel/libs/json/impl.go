@@ -8,6 +8,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/extensions/cel/utils"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // errUnhandledType is returned when a handler cannot process the value.
@@ -92,6 +93,8 @@ func handleRefVal(value any) (any, error) {
 func handleKnownTypes(value any) (any, error) {
 	switch v := value.(type) {
 	case nil:
+		return nil, nil
+	case structpb.NullValue:
 		return nil, nil
 	case bool, string,
 		int, int8, int16, int32, int64,
