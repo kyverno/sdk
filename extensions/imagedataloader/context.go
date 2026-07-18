@@ -41,15 +41,17 @@ func NewImageContext(lister corev1listers.SecretLister, opts []remote.Option, na
 }
 
 func (idc *imageContext) AddImages(ctx context.Context, images []string, authOpts []remote.Option, nameOpts []name.Option) error {
-	idc.Lock()
-	defer idc.Unlock()
-
 	var g errgroup.Group
 	g.SetLimit(workers)
 
+	unique := make(map[string]struct{}, len(images))
 	for _, img := range images {
+		if _, found := unique[img]; found {
+			continue
+		}
+		unique[img] = struct{}{}
 		g.Go(func() error {
-			if _, found := idc.list[img]; found {
+			if _, found := idc.lookup(img); found {
 				return nil
 			}
 
@@ -57,7 +59,7 @@ func (idc *imageContext) AddImages(ctx context.Context, images []string, authOpt
 			if err != nil {
 				return err
 			}
-			idc.list[img] = data
+			idc.store(img, data)
 			return nil
 		})
 	}
@@ -70,19 +72,30 @@ func (idc *imageContext) AddImages(ctx context.Context, images []string, authOpt
 }
 
 func (idc *imageContext) Get(ctx context.Context, image string, authOpts []remote.Option, nameOpts []name.Option) (*ImageData, error) {
-	idc.RLock()
-	if data, found := idc.list[image]; found {
+	if data, found := idc.lookup(image); found {
 		return data, nil
 	}
-	idc.RUnlock()
 
 	data, err := idc.f.FetchImageData(ctx, image, authOpts, nameOpts)
 	if err != nil {
 		return nil, err
 	}
+	return idc.store(image, data), nil
+}
+
+func (idc *imageContext) lookup(image string) (*ImageData, bool) {
+	idc.RLock()
+	defer idc.RUnlock()
+	data, found := idc.list[image]
+	return data, found
+}
+
+func (idc *imageContext) store(image string, data *ImageData) *ImageData {
 	idc.Lock()
 	defer idc.Unlock()
+	if existing, found := idc.list[image]; found {
+		return existing
+	}
 	idc.list[image] = data
-
-	return data, nil
+	return data
 }
