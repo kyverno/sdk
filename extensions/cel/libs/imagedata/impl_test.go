@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/sdk/extensions/cel/compiler"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/version"
@@ -17,7 +18,7 @@ func Test_impl_get_imagedata_string(t *testing.T) {
 	assert.NotNil(t, base)
 
 	ctx := Context{&ContextMock{
-		GetImageDataFunc: func(image string) (map[string]any, error) {
+		GetImageDataFunc: func(image string, remoteOpts []remote.Option) (map[string]any, error) {
 			return map[string]any{
 				"resolvedImage": "ghcr.io/kyverno/kyverno:latest@sha256:",
 			}, nil
@@ -25,7 +26,7 @@ func Test_impl_get_imagedata_string(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, version.MajorMinor(1, 18)),
+		Lib(&ctx, version.MajorMinor(1, 18), nil),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -48,7 +49,7 @@ func Test_impl_get_imagedata_string_error(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, Latest()),
+		Lib(nil, Latest(), nil),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
