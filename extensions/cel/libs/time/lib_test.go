@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/cel-go/cel"
-	"github.com/kyverno/sdk/cel/compiler"
+	"github.com/kyverno/sdk/extensions/cel/compiler"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -8,7 +8,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/kyverno/sdk/cel/compiler"
+	"github.com/kyverno/sdk/extensions/cel/compiler"
 	"github.com/kyverno/sdk/extensions/cel/libs/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -179,7 +179,27 @@ func TestImage(t *testing.T) {
 		{
 			name:        "identifer_digest_and_tag",
 			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64:latest@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2").identifier()`,
-			expectValue: types.String("sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2"),
+			expectValue: types.String("latest@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2"),
+		},
+		{
+			name:        "identifier_with_separator_tag",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64:testtag").identifierWithSeparator()`,
+			expectValue: types.String(":testtag"),
+		},
+		{
+			name:        "identifier_with_separator_default",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64").identifierWithSeparator()`,
+			expectValue: types.String(":latest"),
+		},
+		{
+			name:        "identifier_with_separator_digest",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2").identifierWithSeparator()`,
+			expectValue: types.String("@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2"),
+		},
+		{
+			name:        "identifier_with_separator_tag_and_digest",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64:latest@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2").identifierWithSeparator()`,
+			expectValue: types.String("@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2"),
 		},
 		{
 			name:        "tag",
@@ -195,6 +215,16 @@ func TestImage(t *testing.T) {
 			name:        "no_tag",
 			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2").tag()`,
 			expectValue: types.String(""),
+		},
+		{
+			name:        "tag_with_digest",
+			expr:        `parseImageReference("registry.k8s.io/kube-apiserver-arm64:latest@sha256:6aefddb645ee6963afd681b1845c661d0ea4c3b20ab9db86d9e753b203d385f2").tag()`,
+			expectValue: types.String("latest"),
+		},
+		{
+			name:        "tag_with_digest_registry_port",
+			expr:        `parseImageReference("fictional.registry.example:10443/imagename:my_tag@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff").tag()`,
+			expectValue: types.String("my_tag"),
 		},
 		{
 			name:        "identifier_tag",

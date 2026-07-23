@@ -13,10 +13,10 @@ var (
 )
 
 func Test_ImageDataLoader(t *testing.T) {
-	idf, err := New(nil)
+	idf, err := New(nil, nil, nil)
 	assert.NoError(t, err)
 
-	img, err := idf.FetchImageData(context.TODO(), image)
+	img, err := idf.FetchImageData(context.TODO(), image, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, img.Image, image)
@@ -26,7 +26,7 @@ func Test_ImageDataLoader(t *testing.T) {
 	assert.Equal(t, img.Digest, "sha256:b31bfb4d0213f254d361e0079deaaebefa4f82ba7aa76ef82e90b4935ad5b105")
 	assert.Equal(t, img.ResolvedImage, "ghcr.io/kyverno/test-verify-image:signed@sha256:b31bfb4d0213f254d361e0079deaaebefa4f82ba7aa76ef82e90b4935ad5b105")
 
-	img, err = idf.FetchImageData(context.TODO(), "ghcr.io/kyverno/kyverno:latest")
+	img, err = idf.FetchImageData(context.TODO(), "ghcr.io/kyverno/kyverno:latest", nil, nil)
 	assert.NoError(t, err)
 	indexMediaType := img.ImageIndex.(map[string]any)["mediaType"].(string)
 	assert.Equal(t, indexMediaType, string(types.OCIImageIndex))
@@ -39,10 +39,10 @@ func Test_ImageDataLoader(t *testing.T) {
 }
 
 func Test_Referrers(t *testing.T) {
-	idf, err := New(nil)
+	idf, err := New(nil, nil, nil)
 	assert.NoError(t, err)
 
-	img, err := idf.FetchImageData(context.TODO(), image)
+	img, err := idf.FetchImageData(context.TODO(), image, nil, nil)
 	assert.NoError(t, err)
 
 	refList, err := img.FetchReferrers("application/vnd.cncf.notary.signature")

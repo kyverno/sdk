@@ -3,7 +3,7 @@ package imagedata
 import (
 	"testing"
 
-	"github.com/kyverno/sdk/cel/compiler"
+	"github.com/kyverno/sdk/extensions/cel/compiler"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,7 +13,7 @@ func TestLib(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, Latest()),
+		Lib(nil, Latest(), nil),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)

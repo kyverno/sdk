@@ -15,15 +15,16 @@ const libraryName = "kyverno.generator"
 
 type lib struct {
 	generatorIface ContextInterface
+	namespace      string
 	version        *version.Version
 }
 
-func Lib(generatorCtx ContextInterface, v *version.Version) cel.EnvOption {
+func Lib(generatorCtx ContextInterface, namespace string, v *version.Version) cel.EnvOption {
 	if v == nil {
 		panic(libraryName + ": library version must not be nil")
 	}
 	// create the cel lib env option
-	return cel.Lib(&lib{generatorIface: generatorCtx, version: v})
+	return cel.Lib(&lib{generatorIface: generatorCtx, namespace: namespace, version: v})
 }
 
 func Latest() *version.Version {
@@ -53,32 +54,58 @@ func (l *lib) ProgramOptions() []cel.ProgramOption {
 }
 
 func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
-	impl := impl{
-		Adapter: env.CELTypeAdapter(),
+	if c.namespace != "" {
+		return c.namespacedEnv(env)
 	}
+	return c.clusterEnv(env)
+}
 
+func (c *lib) clusterEnv(env *cel.Env) (*cel.Env, error) {
+	ci := impl{Adapter: env.CELTypeAdapter()}
 	buildApplyOverloads := func(suffix string) []cel.FunctionOpt {
 		return []cel.FunctionOpt{
 			cel.MemberOverload(
 				fmt.Sprintf("generator_apply_string_list_%s", suffix),
 				[]*cel.Type{ContextType, types.StringType, types.NewListType(types.NewMapType(types.StringType, types.AnyType))},
 				types.BoolType,
-				cel.FunctionBinding(impl.apply_generator_string_list),
+				cel.FunctionBinding(ci.apply_generator_string_list),
 			),
 		}
 	}
-	// build our function overloads
 	libraryDecls := map[string][]cel.FunctionOpt{
 		"Apply": buildApplyOverloads("pascal"),
 	}
 	if c.version.AtLeast(version.MajorMinor(1, 18)) {
 		libraryDecls["apply"] = buildApplyOverloads("camel")
 	}
-	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}
 	for name, overloads := range libraryDecls {
 		options = append(options, cel.Function(name, overloads...))
 	}
-	// extend environment with our function overloads
+	return env.Extend(options...)
+}
+
+func (c *lib) namespacedEnv(env *cel.Env) (*cel.Env, error) {
+	ni := namespacedImpl{namespace: c.namespace, Adapter: env.CELTypeAdapter()}
+	buildApplyOverloads := func(suffix string) []cel.FunctionOpt {
+		return []cel.FunctionOpt{
+			cel.MemberOverload(
+				fmt.Sprintf("generator_apply_list_%s", suffix),
+				[]*cel.Type{ContextType, types.NewListType(types.NewMapType(types.StringType, types.AnyType))},
+				types.BoolType,
+				cel.FunctionBinding(ni.apply_generator_list),
+			),
+		}
+	}
+	libraryDecls := map[string][]cel.FunctionOpt{
+		"Apply": buildApplyOverloads("pascal"),
+	}
+	if c.version.AtLeast(version.MajorMinor(1, 18)) {
+		libraryDecls["apply"] = buildApplyOverloads("camel")
+	}
+	options := []cel.EnvOption{}
+	for name, overloads := range libraryDecls {
+		options = append(options, cel.Function(name, overloads...))
+	}
 	return env.Extend(options...)
 }
