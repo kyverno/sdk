@@ -178,6 +178,12 @@ func TestImplMarshal(t *testing.T) {
 			expectResult: `true`,
 		},
 		{
+			name:         "marshal byte slice as base64",
+			jsonVal:      jsonInstance,
+			inputVal:     []byte("foo"),
+			expectResult: `"Zm9v"`,
+		},
+		{
 			name:      "json convert error",
 			jsonVal:   "not a json struct",
 			inputVal:  "irrelevant",
@@ -231,6 +237,13 @@ func TestImplMarshal(t *testing.T) {
 	}
 }
 
+func TestToJsonNativeNonStringMapKey(t *testing.T) {
+	_, err := toJsonNative(map[int]any{1: "value"})
+	if err == nil {
+		t.Fatal("expected error for non-string map key, got nil")
+	}
+}
+
 func TestMarshalCELIntegration(t *testing.T) {
 	env, err := cel.NewEnv(
 		Lib(&JsonImpl{}, Latest()),
@@ -270,9 +283,37 @@ func TestMarshalCELIntegration(t *testing.T) {
 			expectJSON: `true`,
 		},
 		{
+			name:       "marshal null",
+			expr:       `json.marshal(null)`,
+			expectJSON: `null`,
+		},
+		{
 			name:       "roundtrip unmarshal then marshal",
 			expr:       `json.marshal(json.unmarshal("{\"a\":\"b\"}"))`,
 			expectJSON: `{"a":"b"}`,
+		},
+		{
+			name: "marshal nested dyn map",
+			expr: `json.marshal(dyn({
+				"str": dyn("foo"),
+				"nested": dyn({
+					"arr": dyn([]),
+					"bol": dyn(true),
+					"nil": dyn(null),
+					"num": dyn(1),
+					"str": dyn("bar")
+				}),
+			}))`,
+			expectJSON: `{"nested":{"arr":[],"bol":true,"nil":null,"num":1,"str":"bar"},"str":"foo"}`,
+		},
+		{
+			name: "marshal list with dyn map",
+			expr: `json.marshal([
+				dyn({
+					"str": dyn("foo")
+				})
+			])`,
+			expectJSON: `[{"str":"foo"}]`,
 		},
 	}
 
