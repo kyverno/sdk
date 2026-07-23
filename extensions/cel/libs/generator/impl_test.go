@@ -28,7 +28,7 @@ func Test_apply_generator_string_list(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, version.MajorMinor(1, 18)),
+		Lib(&ctx, "", version.MajorMinor(1, 18)),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -56,13 +56,47 @@ generator.apply(
 	assert.NoError(t, err)
 }
 
+func Test_apply_namespaced_no_namespace_arg(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+
+	called := false
+	var capturedNS string
+	ctx := Context{&ContextMock{
+		GenerateResourcesFunc: func(namespace string, dataList []map[string]any) error {
+			called = true
+			capturedNS = namespace
+			return nil
+		},
+	}}
+
+	env, err := base.Extend(
+		Lib(&ctx, "tenant-ns", version.MajorMinor(1, 18)),
+	)
+	assert.NoError(t, err)
+
+	// cross-namespace call must not compile — namespace arg not accepted in namespaced policies
+	_, issues := env.Compile(`generator.apply("kube-system", [{"apiVersion": dyn("v1"), "kind": dyn("ConfigMap")}])`)
+	assert.NotNil(t, issues, "namespace arg must not be accepted in a namespaced policy")
+
+	// correct call: no namespace arg — policy namespace is used automatically
+	ast, issues := env.Compile(`generator.apply([{"apiVersion": dyn("v1"), "kind": dyn("ConfigMap")}])`)
+	assert.Nil(t, issues)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	_, _, err = prog.Eval(map[string]any{})
+	assert.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, "tenant-ns", capturedNS, "GenerateResources must receive the policy's own namespace")
+}
+
 func Test_apply_generator_string_list_error(t *testing.T) {
 	base, err := compiler.NewBaseEnv()
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, Latest()),
+		Lib(nil, "", Latest()),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
