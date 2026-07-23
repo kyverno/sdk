@@ -12,7 +12,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/api/api/policies.kyverno.io/v1beta1"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	k8scorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
 const (
@@ -21,42 +21,40 @@ const (
 )
 
 type Fetcher interface {
-	FetchImageData(ctx context.Context, image string, options ...Option) (*ImageData, error)
+	FetchImageData(ctx context.Context, image string, authOpts []remote.Option, nameOpts []name.Option) (*ImageData, error)
 }
 
 type imagedatafetcher struct {
-	lister         k8scorev1.SecretInterface
-	defaultOptions []remote.Option
+	lister          corev1listers.SecretLister
+	defaultOptions  []remote.Option
+	defaultNameOpts []name.Option
 }
 
-func New(lister k8scorev1.SecretInterface, opts ...Option) (*imagedatafetcher, error) {
-	remoteOpts, err := makeDefaultOpts(lister, opts...)
-	if err != nil {
-		return nil, err
-	}
+func New(lister corev1listers.SecretLister, defaultAuthOpts []remote.Option, defaultNameOpts []name.Option) (*imagedatafetcher, error) {
 	return &imagedatafetcher{
-		lister:         lister,
-		defaultOptions: remoteOpts,
+		lister:          lister,
+		defaultOptions:  defaultAuthOpts,
+		defaultNameOpts: defaultNameOpts,
 	}, nil
 }
 
-func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, options ...Option) (*ImageData, error) {
+func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, authOpts []remote.Option, nameOpts []name.Option) (*ImageData, error) {
 	img := ImageData{
 		referrersData: make(map[string]referrerData),
+		nameOpts:      nameOpts,
 	}
 
-	var err error
-	img.remoteOpts, err = i.remoteOptions(ctx, i.lister, options...)
+	// create the initial set of remote options and add to them the auth options
+	img.remoteOpts = i.remoteOptions(ctx)
+	img.remoteOpts = append(img.remoteOpts, authOpts...)
+
+	imgRef, err := ParseImageReference(image, img.nameOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	img.ImageReference, err = ParseImageReference(image, options...)
-	if err != nil {
-		return nil, err
-	}
+	img.ImageReference = imgRef
 
-	img.nameOpts = nameOptions(options...)
 	ref, err := name.ParseReference(image, img.nameOpts...)
 	if err != nil {
 		return nil, err
@@ -109,16 +107,10 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, opt
 	return &img, nil
 }
 
-func (i *imagedatafetcher) remoteOptions(ctx context.Context, lister k8scorev1.SecretInterface, options ...Option) ([]remote.Option, error) {
+func (i *imagedatafetcher) remoteOptions(ctx context.Context) []remote.Option {
 	var opts []remote.Option
-	opts = append(opts, i.defaultOptions...)
+	opts = append(opts, i.defaultOptions...) // append the options we created in new
 
-	authOpts, err := makeAuthOptions(lister, options...)
-	if err != nil {
-		return nil, err
-	}
-
-	opts = append(opts, authOpts...)
 	opts = append(opts, remote.WithContext(ctx))
 	opts = append(opts, remote.WithRetryStatusCodes(
 		http.StatusRequestTimeout,
@@ -131,7 +123,7 @@ func (i *imagedatafetcher) remoteOptions(ctx context.Context, lister k8scorev1.S
 		429, // Too Many Requests
 	))
 
-	return opts, nil
+	return opts
 }
 
 type ImageDescriptor struct {

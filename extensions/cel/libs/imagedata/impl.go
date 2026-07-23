@@ -3,11 +3,13 @@ package imagedata
 import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/sdk/extensions/cel/utils"
 )
 
 type impl struct {
 	types.Adapter
+	authOpts []remote.Option
 }
 
 func (c *impl) get_imagedata_string(args ...ref.Val) ref.Val {
@@ -19,7 +21,7 @@ func (c *impl) get_imagedata_string(args ...ref.Val) ref.Val {
 	} else if image, err := utils.ConvertToNative[string](args[1]); err != nil {
 		return types.WrapErr(err)
 	} else {
-		globalRef, err := self.GetImageData(image)
+		globalRef, err := self.GetImageData(image, c.authOpts)
 		if err != nil {
 			// Errors are not expected here since Parse is a more lenient parser than ParseRequestURI.
 			return types.NewErr("failed to get image data: %v", err)

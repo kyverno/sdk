@@ -46,7 +46,7 @@ func (c *impl) list_of_objects_to_map(args ...ref.Val) ref.Val {
 		// attempt to handle the entry first as a map string any, if it failed try as a map of ref.Val to ref.Val
 		entry1, ok = entry.(map[string]any)
 		if !ok {
-			entry1, err = refValMapToGoMap(entry.(map[ref.Val]ref.Val))
+			entry1, err = refValMapToGoMap(entry.(map[any]any))
 			if err != nil {
 				return types.WrapErr(err)
 			}
@@ -59,7 +59,7 @@ func (c *impl) list_of_objects_to_map(args ...ref.Val) ref.Val {
 
 		entry2, ok = list2[i].(map[string]any)
 		if !ok {
-			entry2, err = refValMapToGoMap(list2[i].(map[ref.Val]ref.Val))
+			entry2, err = refValMapToGoMap(list2[i].(map[any]any))
 			if err != nil {
 				return types.WrapErr(fmt.Errorf("object cannot be handled as a map string to any in the value object list"))
 			}
@@ -70,18 +70,14 @@ func (c *impl) list_of_objects_to_map(args ...ref.Val) ref.Val {
 	return c.NativeToValue(ret)
 }
 
-func refValMapToGoMap(valMap map[ref.Val]ref.Val) (map[string]any, error) {
-	resultMap := make(map[string]any, len(valMap))
-	for k, v := range valMap {
-		keyStr, err := utils.ConvertToNative[string](k)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert key to a string, %+v", k.Type().TypeName())
+func refValMapToGoMap(ifaceMap map[any]any) (map[string]any, error) {
+	resultMap := make(map[string]any, len(ifaceMap))
+	for k, v := range ifaceMap {
+		keyStr, ok := k.(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to convert key to a string, %+T", k)
 		}
-		valAny, err := utils.ConvertToNative[any](v)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert value to any, %+v", v.Type().TypeName())
-		}
-		resultMap[keyStr] = valAny
+		resultMap[keyStr] = v
 	}
 	return resultMap, nil
 }

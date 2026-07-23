@@ -90,6 +90,14 @@ func (*imageLibType) declarations() map[string][]cel.FunctionOpt {
 				cel.UnaryBinding(imageIdentifier),
 			),
 		},
+		"identifierWithSeparator": {
+			cel.MemberOverload(
+				"image_identifier_with_separator",
+				[]*cel.Type{ImageType},
+				cel.StringType,
+				cel.UnaryBinding(imageIdentifierWithSeparator),
+			),
+		},
 		"tag": {
 			cel.MemberOverload(
 				"image_tag",
