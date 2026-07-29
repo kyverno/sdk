@@ -51,28 +51,110 @@ func MustRegistryClient() Client {
 	return registryClient
 }
 
+// SetupGlobalRegistryClient initializes the package-level global Client. imagePullSecrets and
+// regCredHelpers are comma-separated lists, as passed on the command line. Only the first call
+// has any effect; later calls return the client built by the first one.
 func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultNamespace string,
 	imagePullSecrets string, regCredHelpers string, allowInsecure bool) Client {
 	once.Do(func() {
-		registryClient = New(secretLister, defaultNamespace, imagePullSecrets, regCredHelpers, allowInsecure)
+		opts := []Option{WithSecretLister(secretLister, defaultNamespace)}
+		if imagePullSecrets != "" {
+			opts = append(opts, WithImagePullSecrets(buildSecretList(imagePullSecrets, ",")...))
+		}
+		if regCredHelpers != "" {
+			opts = append(opts, WithCredentialHelpers(buildSecretList(regCredHelpers, ",")...))
+		}
+		if allowInsecure {
+			opts = append(opts, WithAllowInsecureRegistry(true))
+		}
+		registryClient = New(opts...)
 	})
 	return registryClient
 }
 
-func New(secretLister corev1listers.SecretLister, defaultNamespace string,
-	imagePullSecrets string, regCredHelpers string, allowInsecure bool) Client {
-	// create an array of key chains
-	kcs := []authn.Keychain{}
-	if imagePullSecrets != "" {
-		secrets := strings.Split(imagePullSecrets, ",")
-		kc := regcreds.NewSecretsKeychain(secretLister, defaultNamespace, secrets...)
-		kcs = append(kcs, kc)
+// options accumulates the configuration collected from the Option values passed to New.
+type options struct {
+	secretLister      corev1listers.SecretLister
+	defaultNamespace  string
+	imagePullSecrets  []string
+	credentialHelpers []string
+	allowInsecure     bool
+	keychain          authn.Keychain
+}
+
+// Option configures a Client built by New.
+type Option func(*options)
+
+// WithSecretLister configures the lister (and the namespace unqualified secret names are
+// resolved in) used to look up the image pull secrets passed to WithImagePullSecrets.
+func WithSecretLister(lister corev1listers.SecretLister, defaultNamespace string) Option {
+	return func(o *options) {
+		o.secretLister = lister
+		o.defaultNamespace = defaultNamespace
+	}
+}
+
+// WithImagePullSecrets configures the client to also resolve credentials from the given image
+// pull secrets. Each secret can be specified as a name (resolved in the namespace configured via
+// WithSecretLister) or as namespace/name.
+func WithImagePullSecrets(secrets ...string) Option {
+	return func(o *options) {
+		o.imagePullSecrets = append(o.imagePullSecrets, secrets...)
+	}
+}
+
+// WithCredentialHelpers configures the client to also authenticate using the given registry
+// credential providers/helpers (one or more of: default, google, amazon, azure, github).
+func WithCredentialHelpers(providers ...string) Option {
+	return func(o *options) {
+		o.credentialHelpers = append(o.credentialHelpers, providers...)
+	}
+}
+
+// WithAllowInsecureRegistry allows the client to talk to registries over plain HTTP.
+func WithAllowInsecureRegistry(allow bool) Option {
+	return func(o *options) {
+		o.allowInsecure = allow
+	}
+}
+
+// WithKeychain puts kc first in line to authenticate, falling back to the keychain built
+// from WithImagePullSecrets/WithCredentialHelpers. Useful for layering per-request
+// credentials on top of an existing keychain without losing it.
+//
+// If applied more than once, the last WithKeychain wins, falling back to earlier ones.
+func WithKeychain(kc authn.Keychain) Option {
+	return func(o *options) {
+		if kc == nil {
+			return
+		}
+		if o.keychain == nil {
+			o.keychain = kc
+			return
+		}
+		// authn.NewMultiKeychain tries each keychain in order and returns the first non-anonymous authenticator.
+		o.keychain = authn.NewMultiKeychain(kc, o.keychain)
+	}
+}
+
+// New builds a Client. With no options, it authenticates using authn.DefaultKeychain
+// (local Docker/Podman config, or anonymous). Use WithImagePullSecrets/WithCredentialHelpers
+// for Kubernetes-based credentials, and WithKeychain to layer an existing keychain on top.
+func New(opts ...Option) Client {
+	var o options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
 	}
 
-	credHelpers := strings.Split(regCredHelpers, ",")
-	if len(credHelpers) > 0 && regCredHelpers != "" {
-		regkc := regcreds.KeychainsForProviders(credHelpers...)
-		kcs = append(kcs, regkc...)
+	// create an array of key chains
+	kcs := []authn.Keychain{}
+	if len(o.imagePullSecrets) > 0 && o.secretLister != nil {
+		kcs = append(kcs, regcreds.NewSecretsKeychain(o.secretLister, o.defaultNamespace, o.imagePullSecrets...))
+	}
+	if len(o.credentialHelpers) > 0 {
+		kcs = append(kcs, regcreds.KeychainsForProviders(o.credentialHelpers...)...)
 	}
 
 	var authnKc authn.Keychain
@@ -82,12 +164,15 @@ func New(secretLister corev1listers.SecretLister, defaultNamespace string,
 		authnKc = authn.DefaultKeychain
 	}
 
-	c := &client{
-		allowInsecureRegistry: allowInsecure,
+	if o.keychain != nil {
+		authnKc = authn.NewMultiKeychain(o.keychain, authnKc)
+	}
+
+	return &client{
+		allowInsecureRegistry: o.allowInsecure,
 		keychain:              authnKc,
 		transport:             tracing.Transport(regcreds.DefaultTransport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)),
 	}
-	return c
 }
 
 // In some scenarios, we don't want to rely on the puller and pusher that have been created by the registry
@@ -161,4 +246,16 @@ func (c *client) FetchImageDescriptor(ctx context.Context, imageRef string) (*gc
 
 func (c *client) Keychain() authn.Keychain {
 	return c.keychain
+}
+
+// buildSecretList splits a comma-separated list of secrets into a slice of strings, trimming whitespace and ignoring empty entries.
+func buildSecretList(in string, sep string) []string {
+	parts := strings.Split(in, sep)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
