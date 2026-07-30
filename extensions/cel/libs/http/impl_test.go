@@ -2,11 +2,14 @@ package http
 
 import (
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/cel-go/cel"
@@ -14,6 +17,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/extensions/cel/compiler"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/util/version"
 )
 
@@ -328,8 +332,47 @@ func Test_impl_http_client_string(t *testing.T) {
 		"pem": pemExample,
 	})
 	assert.NoError(t, err)
-	reqProvider := out.Value().(*contextImpl)
-	assert.NotNil(t, reqProvider)
+
+	reqProvider := out.Value().(Context)
+	assert.NotNil(t, reqProvider.ContextInterface)
+}
+
+func Test_impl_http_client_string_get(t *testing.T) {
+	var reached atomic.Bool
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Store(true)
+		assert.Equal(t, http.MethodGet, r.Method)
+		_, err := w.Write([]byte(`{"body":"ok"}`))
+		assert.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	caBundle := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	ctx := Context{ContextInterface: NewHTTP()}
+	base, err := compiler.NewBaseEnv()
+	require.NoError(t, err)
+	env, err := base.Extend(
+		cel.Variable("caBundle", types.StringType),
+		cel.Variable("url", types.StringType),
+		Lib(&ctx, version.MajorMinor(1, 18)),
+	)
+	require.NoError(t, err)
+	ast, issues := env.Compile(`http.Client(caBundle).Get(url)`)
+	require.NoError(t, issues.Err())
+	prog, err := env.Program(ast)
+	require.NoError(t, err)
+
+	out, _, err := prog.Eval(map[string]any{
+		"caBundle": string(caBundle),
+		"url":      server.URL,
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, types.ErrType, out.Type(), out)
+	body, ok := out.Value().(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "ok", body["body"])
+	assert.Equal(t, http.StatusOK, body["statusCode"])
+	assert.True(t, reached.Load())
 }
 
 func Test_impl_http_client_string_error(t *testing.T) {
