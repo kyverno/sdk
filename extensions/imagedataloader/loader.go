@@ -61,7 +61,14 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	}
 	img.nameRef = ref
 
-	remoteImg, err := remote.Image(ref, img.remoteOpts...)
+	// fetched before the image, remote.Get does not resolve an index to a single platform
+	desc, err := remote.Get(ref, img.remoteOpts...)
+	if err != nil {
+		return nil, err
+	}
+	img.desc = desc
+
+	remoteImg, err := imageForDescriptor(desc)
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +82,6 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	if err != nil {
 		return nil, err
 	}
-
-	desc, err := remote.Get(ref, img.remoteOpts...)
-	if err != nil {
-		return nil, err
-	}
-	img.desc = desc
 
 	if len(img.Digest) == 0 {
 		img.Digest = desc.Digest.String()
