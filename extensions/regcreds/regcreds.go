@@ -3,7 +3,6 @@ package regcreds
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/awslabs/amazon-ecr-credential-helper/ecr-login"
 	"github.com/fluxcd/pkg/oci/auth/azure"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/authn/github"
@@ -32,7 +30,8 @@ import (
 )
 
 var (
-	AzureKeychain authn.Keychain = azureKeyChain{}
+	AmazonKeychain authn.Keychain = NewAmazonKeychain()
+	AzureKeychain  authn.Keychain = azureKeyChain{}
 
 	KyvernoUserAgent = fmt.Sprintf("Kyverno/%s (%s; %s)", version.GetVersionInfo().GitVersion, runtime.GOOS, runtime.GOARCH)
 	DefaultTransport = &http.Transport{
@@ -95,7 +94,7 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 		chains = append(chains, google.Keychain)
 	}
 	if helpers.Has("amazon") {
-		chains = append(chains, authn.NewKeychainFromHelper(ecr.NewECRHelper(ecr.WithLogger(io.Discard))))
+		chains = append(chains, AmazonKeychain)
 	}
 	if helpers.Has("azure") {
 		chains = append(chains, AzureKeychain)
