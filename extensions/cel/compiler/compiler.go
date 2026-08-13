@@ -51,11 +51,11 @@ func CompileVariable(path *field.Path, env *cel.Env, variablesProvider *Variable
 		if err := issues.Err(); err != nil {
 			return nil, append(allErrs, field.Invalid(path, variable.Expression, err.Error()))
 		}
-		variablesProvider.RegisterField(variable.Name, ast.OutputType())
 		prog, err := env.Program(ast)
 		if err != nil {
 			return nil, append(allErrs, field.Invalid(path, variable.Expression, err.Error()))
 		}
+		variablesProvider.RegisterField(variable.Name, ast.OutputType())
 		return prog, allErrs
 	}
 }
