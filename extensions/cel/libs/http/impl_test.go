@@ -728,3 +728,127 @@ func Test_impl_post_request_with_400_bad_request(t *testing.T) {
 	assert.Equal(t, body["code"], "INVALID_DATA")
 	assert.Equal(t, body["statusCode"], http.StatusBadRequest)
 }
+
+func Test_impl_put_request(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+
+	ctx := Context{&contextImpl{
+		client: testClient{
+			doFunc: func(req *http.Request) (*http.Response, error) {
+				assert.Equal(t, req.URL.String(), "http://localhost:8080")
+				assert.Equal(t, req.Method, "PUT")
+
+				var data any
+				err := json.NewDecoder(req.Body).Decode(&data)
+				assert.NoError(t, err)
+				assert.Equal(t, data.(map[string]any)["key"], "value")
+				assert.Equal(t, data.(map[string]any)["foo"], float64(2))
+
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "updated"}`))}, nil
+			},
+		},
+	}}
+
+	env, err := base.Extend(
+		Lib(&ctx, version.MajorMinor(1, 18)),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Put("http://localhost:8080", { "key": dyn("value"), "foo": dyn(2) })`)
+	fmt.Println(issues.String())
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+
+	out, _, err := prog.Eval(map[string]any{})
+	assert.NoError(t, err)
+	body := out.Value().(map[string]any)
+	assert.Equal(t, body["body"], "updated")
+	assert.Equal(t, body["statusCode"], http.StatusOK)
+}
+
+func Test_impl_put_request_with_headers(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+
+	ctx := Context{&contextImpl{
+		client: testClient{
+			doFunc: func(req *http.Request) (*http.Response, error) {
+				assert.Equal(t, req.URL.String(), "http://localhost:8080")
+				assert.Equal(t, req.Method, "PUT")
+				assert.Equal(t, req.Header.Get("Authorization"), "Bearer token")
+
+				var data any
+				err := json.NewDecoder(req.Body).Decode(&data)
+				assert.NoError(t, err)
+				assert.Equal(t, data.(map[string]any)["key"], "value")
+
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"body": "updated"}`))}, nil
+			},
+		},
+	}}
+
+	env, err := base.Extend(
+		Lib(&ctx, version.MajorMinor(1, 18)),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	ast, issues := env.Compile(`http.Put("http://localhost:8080", {"key": "value"}, {"Authorization": "Bearer token"})`)
+	fmt.Println(issues.String())
+	assert.Nil(t, issues)
+	assert.NotNil(t, ast)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+	assert.NotNil(t, prog)
+
+	out, _, err := prog.Eval(map[string]any{})
+	assert.NoError(t, err)
+	body := out.Value().(map[string]any)
+	assert.Equal(t, body["body"], "updated")
+	assert.Equal(t, body["statusCode"], http.StatusOK)
+}
+
+func Test_impl_put_request_string_with_client_error(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+
+	env, err := base.Extend(
+		Lib(nil, version.MajorMinor(1, 18)),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, env)
+	tests := []struct {
+		name string
+		args []ref.Val
+		want ref.Val
+	}{{
+		name: "not enough args",
+		args: nil,
+		want: types.NewErr("expected 4 arguments, got %d", 0),
+	}, {
+		name: "bad arg 1",
+		args: []ref.Val{types.String("foo"), types.String("http://localhost:8080"), types.String("payload"), env.CELTypeAdapter().NativeToValue(make(map[string]string, 0))},
+		want: types.NewErr("invalid arg 0: unsupported native conversion from string to 'http.Context'"),
+	}, {
+		name: "bad arg 2",
+		args: []ref.Val{env.CELTypeAdapter().NativeToValue(Context{}), types.Bool(false), types.String("payload"), env.CELTypeAdapter().NativeToValue(make(map[string]string, 0))},
+		want: types.NewErr("invalid arg 1: type conversion error from bool to 'string'"),
+	}, {
+		name: "bad arg 4",
+		args: []ref.Val{env.CELTypeAdapter().NativeToValue(Context{}), types.String("http://localhost:8080"), types.String("payload"), types.Bool(false)},
+		want: types.NewErr("invalid arg 3: type conversion error from bool to 'map[string]string'"),
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &impl{}
+			got := c.put_request_string_with_client(tt.args...)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
