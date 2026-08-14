@@ -315,6 +315,42 @@ func (r *contextImpl) Post(url string, data any, headers map[string]string) (any
 	return r.executeRequest(req)
 }
 
+func (r *contextImpl) Put(url string, data any, headers map[string]string) (any, error) {
+	if err := r.validateURL(url); err != nil {
+		return nil, err
+	}
+	body, err := buildRequestData(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode request data: %w", err)
+	}
+	req, err := http.NewRequestWithContext(context.TODO(), "PUT", url, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	for h, v := range headers {
+		req.Header.Add(h, v)
+	}
+	return r.executeRequest(req)
+}
+
+func (r *contextImpl) Patch(url string, data any, headers map[string]string) (any, error) {
+	if err := r.validateURL(url); err != nil {
+		return nil, err
+	}
+	body, err := buildRequestData(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode request data: %w", err)
+	}
+	req, err := http.NewRequestWithContext(context.TODO(), "PATCH", url, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	for h, v := range headers {
+		req.Header.Add(h, v)
+	}
+	return r.executeRequest(req)
+}
+
 func (r *contextImpl) executeRequest(req *http.Request) (any, error) {
 	resp, err := r.client.Do(req)
 	if err != nil {
