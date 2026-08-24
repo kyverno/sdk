@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -727,4 +728,77 @@ func Test_impl_post_request_with_400_bad_request(t *testing.T) {
 	assert.Equal(t, body["error"], "invalid request")
 	assert.Equal(t, body["code"], "INVALID_DATA")
 	assert.Equal(t, body["statusCode"], http.StatusBadRequest)
+}
+
+func Test_validateURL_blocks_ipv6_encoded_ipv4_metadata_ip(t *testing.T) {
+	// 169.254.169.254 can be spelled as an IPv6 address in several ways that
+	// net.IPNet.Contains does not recognise on its own. Each must still be caught by
+	// the 169.254.0.0/16 entry in the default blocklist.
+	tests := []struct {
+		name string
+		url  string
+	}{{
+		name: "ipv4-mapped",
+		url:  "http://[::ffff:169.254.169.254]/latest/meta-data/",
+	}, {
+		name: "ipv4-compatible",
+		url:  "http://[::169.254.169.254]/latest/meta-data/",
+	}, {
+		name: "nat64 well-known prefix",
+		url:  "http://[64:ff9b::a9fe:a9fe]/latest/meta-data/",
+	}, {
+		name: "6to4",
+		url:  "http://[2002:a9fe:a9fe::]/latest/meta-data/",
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+			assert.NoError(t, err)
+			_, err = ctx.Get(tt.url, nil)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "blocked range 169.254.0.0/16")
+		})
+	}
+}
+
+func Test_embeddedIPv4(t *testing.T) {
+	tests := []struct {
+		name string
+		ip   string
+		want string
+	}{{
+		name: "ipv4 has nothing embedded",
+		ip:   "169.254.169.254",
+		want: "",
+	}, {
+		name: "ipv4-mapped is already handled by To4",
+		ip:   "::ffff:169.254.169.254",
+		want: "",
+	}, {
+		name: "ipv4-compatible",
+		ip:   "::169.254.169.254",
+		want: "169.254.169.254",
+	}, {
+		name: "nat64",
+		ip:   "64:ff9b::7f00:1",
+		want: "127.0.0.1",
+	}, {
+		name: "6to4",
+		ip:   "2002:7f00:1::1",
+		want: "127.0.0.1",
+	}, {
+		name: "ordinary ipv6",
+		ip:   "2606:4700:4700::1111",
+		want: "",
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := embeddedIPv4(net.ParseIP(tt.ip))
+			if tt.want == "" {
+				assert.Nil(t, got)
+				return
+			}
+			assert.Equal(t, tt.want, got.String())
+		})
+	}
 }

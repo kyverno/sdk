@@ -36,6 +36,58 @@ func effectivePort(u *url.URL) string {
 	return ""
 }
 
+// blockedCIDR returns the blocked range containing ip, or nil if there is none.
+//
+// net.IPNet.Contains normalizes IPv4-mapped IPv6 addresses itself, so an IPv4 range such
+// as 169.254.0.0/16 already contains ::ffff:169.254.169.254. Other IPv6 encodings embed
+// an IPv4 address in a form Contains does not recognise, so the embedded address is
+// checked as well.
+func blockedCIDR(blockedCIDRs []*net.IPNet, ip net.IP) *net.IPNet {
+	for _, candidate := range [2]net.IP{ip, embeddedIPv4(ip)} {
+		if candidate == nil {
+			continue
+		}
+		for _, cidr := range blockedCIDRs {
+			if cidr.Contains(candidate) {
+				return cidr
+			}
+		}
+	}
+	return nil
+}
+
+// embeddedIPv4 extracts the IPv4 address carried by an IPv6 address in a form that
+// net.IP.To4 does not recognise. Each is a different spelling of an address that an IPv4
+// CIDR in the blocklist is meant to cover: without this, [2002:a9fe:a9fe::] reaches the
+// cloud metadata service even though 169.254.0.0/16 is blocked. Returns nil when there is
+// no embedded address, or when To4 already handles it.
+func embeddedIPv4(ip net.IP) net.IP {
+	if ip.To4() != nil || len(ip.To16()) != net.IPv6len {
+		return nil
+	}
+	ip = ip.To16()
+	isZero := func(b []byte) bool {
+		for _, c := range b {
+			if c != 0 {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	// ::a.b.c.d — IPv4-compatible IPv6.
+	case isZero(ip[:12]):
+		return net.IPv4(ip[12], ip[13], ip[14], ip[15])
+	// 64:ff9b::a.b.c.d — the NAT64 well-known prefix, standard in IPv6-only clusters.
+	case ip[0] == 0x00 && ip[1] == 0x64 && ip[2] == 0xff && ip[3] == 0x9b && isZero(ip[4:12]):
+		return net.IPv4(ip[12], ip[13], ip[14], ip[15])
+	// 2002:aabb:ccdd::/48 — 6to4, which carries the IPv4 address in bytes 2-5.
+	case ip[0] == 0x20 && ip[1] == 0x02:
+		return net.IPv4(ip[2], ip[3], ip[4], ip[5])
+	}
+	return nil
+}
+
 // secureDialContext returns a DialContext function that validates resolved IPs
 // against the given blocked CIDRs before establishing a connection. It resolves
 // the hostname itself and dials the validated IP directly, closing the
@@ -53,10 +105,8 @@ func secureDialContext(blockedCIDRs []*net.IPNet) func(ctx context.Context, netw
 		}
 		// Literal IP: validate and dial directly.
 		if ip := net.ParseIP(host); ip != nil {
-			for _, cidr := range blockedCIDRs {
-				if cidr.Contains(ip) {
-					return nil, fmt.Errorf("connection to %s blocked: IP %s falls in blocked range %s", addr, ip, cidr)
-				}
+			if cidr := blockedCIDR(blockedCIDRs, ip); cidr != nil {
+				return nil, fmt.Errorf("connection to %s blocked: IP %s falls in blocked range %s", addr, ip, cidr)
 			}
 			return base.DialContext(ctx, network, addr)
 		}
@@ -74,10 +124,8 @@ func secureDialContext(blockedCIDRs []*net.IPNet) func(ctx context.Context, netw
 			if ip == nil {
 				continue
 			}
-			for _, cidr := range blockedCIDRs {
-				if cidr.Contains(ip) {
-					return nil, fmt.Errorf("connection to %s blocked: resolved IP %s falls in blocked range %s", addr, ip, cidr)
-				}
+			if cidr := blockedCIDR(blockedCIDRs, ip); cidr != nil {
+				return nil, fmt.Errorf("connection to %s blocked: resolved IP %s falls in blocked range %s", addr, ip, cidr)
 			}
 		}
 		// Second pass: dial the first parseable address.
