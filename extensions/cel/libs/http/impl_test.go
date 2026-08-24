@@ -7,9 +7,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/cel-go/cel"
@@ -913,4 +915,135 @@ func Test_Client_with_ca_bundle_wraps_transport_proxy(t *testing.T) {
 	assert.NotEqual(t,
 		reflect.ValueOf(http.ProxyFromEnvironment).Pointer(),
 		reflect.ValueOf(transport.Proxy).Pointer())
+}
+
+// redirectServer serves a 302 to target on "/" and a JSON body everywhere else.
+func redirectServer(t *testing.T, target func() string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/" {
+			http.Redirect(w, req, target(), http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func Test_checkRedirect_refuses_hop_to_blocklisted_hostname(t *testing.T) {
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(origin.Close)
+	// Resolve the blocked hostname to the origin server so that, unguarded, the hop
+	// really does reach it and return its body. A CIDR is configured alongside the
+	// hostnames so the resolver the stub replaces is the one actually used.
+	stubLookupHost(t, map[string][]string{"metadata.google.internal": {"127.0.0.1"}})
+	redirector := redirectServer(t, func() string {
+		return "http://metadata.google.internal:" + originPort(t, origin) + "/computeMetadata/v1/"
+	})
+
+	ctx, err := NewHTTPWithBlocklist([]string{"metadata.google.internal", "169.254.0.0/16"}, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, `hostname "metadata.google.internal" is on the blocklist`)
+}
+
+func Test_checkRedirect_refuses_hop_into_blocked_cidr(t *testing.T) {
+	// secureDialContext already covers this hop, since it sits in the transport. This
+	// is a regression test for that, not for checkRedirect.
+	redirector := redirectServer(t, func() string { return "http://169.254.169.254/latest/meta-data/" })
+	ctx, err := NewHTTPWithBlocklist([]string{"169.254.0.0/16"}, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, "blocked range 169.254.0.0/16")
+}
+
+func Test_checkRedirect_follows_hop_to_permitted_host(t *testing.T) {
+	// A security fix must not stop legitimate redirects being followed.
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "ok"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/v1/resource" })
+
+	ctx, err := NewHTTPWithBlocklist([]string{"169.254.0.0/16"}, nil)
+	assert.NoError(t, err)
+	result, err := ctx.Get(redirector.URL+"/", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, "ok", result.(map[string]any)["body"])
+}
+
+func Test_checkRedirect_follows_hop_permitted_by_the_allowlist(t *testing.T) {
+	// Guards against over-blocking, which is the fix's main regression risk: a hop that
+	// the allowlist permits must still be followed and its body returned.
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "ok"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/v1/resource" })
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{redirector.URL, destination.URL})
+	assert.NoError(t, err)
+	result, err := ctx.Get(redirector.URL+"/", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, "ok", result.(map[string]any)["body"])
+}
+
+func Test_checkRedirect_bounds_redirect_loops(t *testing.T) {
+	var hits atomic.Int32
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, req, srv.URL+"/", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, err := NewHTTPWithBlocklist([]string{"169.254.0.0/16"}, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get(srv.URL+"/", nil)
+	assert.ErrorContains(t, err, "stopped after 10 redirects")
+	// via already contains the initial request, so the tenth response is the one
+	// refused. This is exactly what net/http's own default policy counts.
+	assert.Equal(t, int32(maxRedirects), hits.Load())
+}
+
+func Test_checkRedirect_allowlist_is_not_escapable(t *testing.T) {
+	// The most serious of the three: unguarded, this returns the off-allowlist body
+	// straight back to the caller.
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/steal" })
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{redirector.URL})
+	assert.NoError(t, err)
+	_, err = ctx.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, "no matching allowlist entry")
+}
+
+func Test_checkRedirect_applies_to_client_with_ca_bundle(t *testing.T) {
+	// Client(caBundle) builds its own client and must carry the same policy. The
+	// narrowed RootCAs is irrelevant over plain http.
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/steal" })
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{redirector.URL})
+	assert.NoError(t, err)
+	derived, err := ctx.Client(pemExample)
+	assert.NoError(t, err)
+	_, err = derived.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, "no matching allowlist entry")
+}
+
+func originPort(t *testing.T, srv *httptest.Server) string {
+	t.Helper()
+	u, err := url.Parse(srv.URL)
+	assert.NoError(t, err)
+	return u.Port()
 }

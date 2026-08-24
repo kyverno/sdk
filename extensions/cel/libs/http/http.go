@@ -278,7 +278,31 @@ func (r *contextImpl) newClient(transport *http.Transport) *http.Client {
 		transport.DialContext = secureDialContext(r.blockedCIDRs)
 		transport.Proxy = r.guardedProxy(transport.Proxy)
 	}
-	return &http.Client{Transport: transport}
+	return &http.Client{Transport: transport, CheckRedirect: r.checkRedirect}
+}
+
+// maxRedirects mirrors the limit net/http applies when CheckRedirect is nil. Setting
+// CheckRedirect replaces that default wholesale, so the limit has to be restated or a
+// redirect loop would be followed forever.
+const maxRedirects = 10
+
+// checkRedirect re-applies validateURL to every redirect hop.
+//
+// Redirects are still followed. Refusing them outright would close the same gap but would
+// break policies that work today: an endpoint that legitimately redirects — http to https,
+// a bare path to a versioned one, anything behind an ingress that normalizes URLs — would
+// start failing on upgrade.
+//
+// Following them is safe because secureDialContext sits in the transport and so already
+// re-checks the address of every hop. The checks it cannot make are the ones that need the
+// URL rather than the address — the allowlist and the hostname blocklist — which were
+// otherwise applied only to the URL the caller passed. Without this, a redirect returned
+// the body of an off-allowlist host to the caller.
+func (r *contextImpl) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	return r.validateURL(req.URL.String())
 }
 
 // guardedProxy wraps a transport's proxy resolver so that the CIDR blocklist is applied
