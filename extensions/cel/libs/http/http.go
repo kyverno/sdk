@@ -36,6 +36,10 @@ func effectivePort(u *url.URL) string {
 	return ""
 }
 
+// lookupHost resolves a hostname. It is a variable so that tests can force a specific
+// answer, since resolution of any real name is neither offline-safe nor deterministic.
+var lookupHost = net.DefaultResolver.LookupHost
+
 // blockedCIDR returns the blocked range containing ip, or nil if there is none.
 //
 // net.IPNet.Contains normalizes IPv4-mapped IPv6 addresses itself, so an IPv4 range such
@@ -114,7 +118,7 @@ func secureDialContext(blockedCIDRs []*net.IPNet) func(ctx context.Context, netw
 		// to prevent DNS-rebinding. Validating all IPs (not just the one we dial)
 		// ensures a hostname is fully blocked if any of its resolved addresses
 		// falls in a blocked CIDR range.
-		ips, err := net.DefaultResolver.LookupHost(ctx, host)
+		ips, err := lookupHost(ctx, host)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve %s: %w", host, err)
 		}
@@ -237,36 +241,108 @@ func NewHTTPWithBlocklist(blocklist, allowlist []string) (ContextInterface, erro
 		allowedURLPrefixes = append(allowedURLPrefixes, u)
 	}
 
-	// When blocked CIDRs are configured, install secureDialContext in the
-	// client's transport regardless of whether a custom client was supplied.
-	// This closes the DNS-rebinding window for both default and caller-supplied
-	// clients by enforcing CIDR checks at connection time.
-	var client httpDoer
-	if len(blockedCIDRs) > 0 {
-		client = wrapClientWithSecureDial(blockedCIDRs)
-	} else {
-		client = http.DefaultClient
-	}
-
-	return &contextImpl{
-		client:             client,
+	r := &contextImpl{
+		client:             http.DefaultClient,
 		blockedCIDRs:       blockedCIDRs,
 		blockedHosts:       blockedHosts,
 		allowedURLPrefixes: allowedURLPrefixes,
-	}, nil
+	}
+	// Build a guarded client whenever any rule is configured. A CIDR-only test would
+	// miss the allowlist and hostname rules, which are enforced on the client rather
+	// than on the transport.
+	if r.filtered() {
+		r.client = r.newClient(cloneDefaultTransport())
+	}
+	return r, nil
 }
 
-// wrapClientWithSecureDial builds an *http.Client cloned from http.DefaultTransport
-// with secureDialContext installed, so CIDR validation is enforced at connection
-// time and DNS-rebinding is prevented.
-func wrapClientWithSecureDial(blockedCIDRs []*net.IPNet) *http.Client {
+// filtered reports whether any rule is configured. With none, the context imposes no
+// restrictions at all, which is what NewHTTP documents.
+func (r *contextImpl) filtered() bool {
+	return len(r.blockedCIDRs) > 0 || len(r.blockedHosts) > 0 || len(r.allowedURLPrefixes) > 0
+}
+
+// cloneDefaultTransport returns a private copy of http.DefaultTransport, safe to mutate.
+func cloneDefaultTransport() *http.Transport {
 	baseTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok || baseTransport == nil {
 		baseTransport = &http.Transport{}
 	}
-	t := baseTransport.Clone()
-	t.DialContext = secureDialContext(blockedCIDRs)
-	return &http.Client{Transport: t}
+	return baseTransport.Clone()
+}
+
+// newClient installs the SSRF guard on transport and returns a client using it. The
+// transport must not be shared: both of its hooks are replaced.
+func (r *contextImpl) newClient(transport *http.Transport) *http.Client {
+	if len(r.blockedCIDRs) > 0 {
+		transport.DialContext = secureDialContext(r.blockedCIDRs)
+		transport.Proxy = r.guardedProxy(transport.Proxy)
+	}
+	return &http.Client{Transport: transport}
+}
+
+// guardedProxy wraps a transport's proxy resolver so that the CIDR blocklist is applied
+// to the request target.
+//
+// When a proxy is in use Go dials the PROXY, so secureDialContext is handed the proxy's
+// address and never sees the real target — a cloned http.DefaultTransport keeps
+// ProxyFromEnvironment, so merely setting HTTP_PROXY disabled the CIDR check entirely.
+// Checking here, at the point where we learn a proxy will be used, restores it.
+//
+// This leaves a rebinding window the direct path does not have, since the proxy resolves
+// the target itself. That is inherent to proxying and cannot be closed from this side.
+func (r *contextImpl) guardedProxy(base func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
+	if base == nil {
+		return nil
+	}
+	return func(req *http.Request) (*url.URL, error) {
+		proxyURL, err := base(req)
+		if err != nil || proxyURL == nil {
+			return proxyURL, err
+		}
+		if err := r.validateProxiedHost(req.Context(), req.URL.Hostname()); err != nil {
+			return nil, fmt.Errorf("request to %q is blocked: %w", req.URL.Redacted(), err)
+		}
+		return proxyURL, nil
+	}
+}
+
+// validateProxiedHost applies the CIDR blocklist to a host that will be reached through a
+// proxy, resolving it when it is not already a literal address. The hostname blocklist and
+// the allowlist are not repeated here: validateURL has already applied both.
+func (r *contextImpl) validateProxiedHost(ctx context.Context, host string) error {
+	if ip := net.ParseIP(host); ip != nil {
+		if cidr := blockedCIDR(r.blockedCIDRs, ip); cidr != nil {
+			return fmt.Errorf("IP %s falls in blocked range %s", ip, cidr)
+		}
+		return nil
+	}
+	ips, err := lookupHost(ctx, host)
+	if err != nil {
+		// A cluster that egresses through a proxy commonly cannot resolve external names
+		// itself — the proxy does that — so refusing every unresolvable name would break
+		// calls that work today. But permitting them unconditionally leaves the CIDR
+		// blocklist unenforced for exactly the hosts we cannot see.
+		//
+		// The allowlist settles it. When one is configured, validateURL has already
+		// required this URL to match an entry an operator wrote by hand, so the target is
+		// explicitly sanctioned and an in-pod resolution failure says nothing about it.
+		// With no allowlist, nothing else has vetted the host, so refuse.
+		if len(r.allowedURLPrefixes) > 0 {
+			return nil
+		}
+		return fmt.Errorf("%q cannot be resolved to verify it is not in a blocked range; add it to the allowlist to permit it", host)
+	}
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if cidr := blockedCIDR(r.blockedCIDRs, ip); cidr != nil {
+			return fmt.Errorf("%s resolves into blocked range %s", host, cidr)
+		}
+	}
+	return nil
 }
 
 // validateURL enforces allowlist and hostname-blocklist rules before a request is
@@ -396,11 +472,7 @@ func (r *contextImpl) Client(caBundle string) (ContextInterface, error) {
 	if ok := caCertPool.AppendCertsFromPEM([]byte(caBundle)); !ok {
 		return nil, fmt.Errorf("failed to parse PEM CA bundle for APICall")
 	}
-	baseTransport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok || baseTransport == nil {
-		baseTransport = &http.Transport{}
-	}
-	transport := baseTransport.Clone()
+	transport := cloneDefaultTransport()
 	if transport.TLSClientConfig != nil {
 		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
 	} else {
@@ -410,15 +482,13 @@ func (r *contextImpl) Client(caBundle string) (ContextInterface, error) {
 	if transport.TLSClientConfig.MinVersion < tls.VersionTLS12 {
 		transport.TLSClientConfig.MinVersion = tls.VersionTLS12
 	}
-	if len(r.blockedCIDRs) > 0 {
-		transport.DialContext = secureDialContext(r.blockedCIDRs)
-	}
-	return &contextImpl{
-		client:             &http.Client{Transport: transport},
+	derived := &contextImpl{
 		blockedCIDRs:       r.blockedCIDRs,
 		blockedHosts:       r.blockedHosts,
 		allowedURLPrefixes: r.allowedURLPrefixes,
-	}, nil
+	}
+	derived.client = derived.newClient(transport)
+	return derived, nil
 }
 
 func buildRequestData(data any) (io.Reader, error) {

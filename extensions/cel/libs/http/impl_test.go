@@ -1,12 +1,14 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -755,8 +757,7 @@ func Test_validateURL_blocks_ipv6_encoded_ipv4_metadata_ip(t *testing.T) {
 			ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
 			assert.NoError(t, err)
 			_, err = ctx.Get(tt.url, nil)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "blocked range 169.254.0.0/16")
+			assert.ErrorContains(t, err, "blocked range 169.254.0.0/16")
 		})
 	}
 }
@@ -801,4 +802,115 @@ func Test_embeddedIPv4(t *testing.T) {
 			assert.Equal(t, tt.want, got.String())
 		})
 	}
+}
+
+// stubLookupHost replaces the package resolver for the duration of a test.
+func stubLookupHost(t *testing.T, answers map[string][]string) {
+	t.Helper()
+	original := lookupHost
+	t.Cleanup(func() { lookupHost = original })
+	lookupHost = func(_ context.Context, host string) ([]string, error) {
+		if ips, ok := answers[host]; ok {
+			return ips, nil
+		}
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
+}
+
+// proxiedRequest builds the inputs guardedProxy is called with: a request for rawURL and
+// a base resolver that always selects a proxy.
+func proxiedRequest(t *testing.T, rawURL string) (*http.Request, func(*http.Request) (*url.URL, error)) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	assert.NoError(t, err)
+	proxyURL, err := url.Parse("http://proxy.example.com:3128")
+	assert.NoError(t, err)
+	return req, func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+}
+
+func Test_guardedProxy_blocks_literal_ip_in_blocked_range(t *testing.T) {
+	// Without the proxy wrapper, secureDialContext only ever sees proxy.example.com and
+	// the metadata IP is reached through the proxy.
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "http://169.254.169.254/latest/meta-data/")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.Nil(t, got)
+	assert.ErrorContains(t, err, "blocked range 169.254.0.0/16")
+}
+
+func Test_guardedProxy_blocks_hostname_resolving_into_blocked_range(t *testing.T) {
+	stubLookupHost(t, map[string][]string{"metadata.example.com": {"169.254.169.254"}})
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "http://metadata.example.com/latest/meta-data/")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.Nil(t, got)
+	assert.ErrorContains(t, err, "resolves into blocked range 169.254.0.0/16")
+}
+
+func Test_guardedProxy_permits_hostname_outside_blocked_ranges(t *testing.T) {
+	stubLookupHost(t, map[string][]string{"api.example.com": {"93.184.216.34"}})
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "https://api.example.com/v1/resource")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.NoError(t, err)
+	assert.Equal(t, "http://proxy.example.com:3128", got.String())
+}
+
+func Test_guardedProxy_refuses_unresolvable_host_without_allowlist(t *testing.T) {
+	// Nothing has vetted the host and the CIDR check cannot be applied, so refuse.
+	stubLookupHost(t, nil)
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "https://api.example.com/v1/resource")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.Nil(t, got)
+	assert.ErrorContains(t, err, "cannot be resolved to verify it is not in a blocked range")
+}
+
+func Test_guardedProxy_permits_unresolvable_host_with_allowlist(t *testing.T) {
+	// Clusters that egress through a proxy commonly cannot resolve external names
+	// in-pod. An allowlist entry is an operator saying the target is sanctioned.
+	stubLookupHost(t, nil)
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, []string{"https://api.example.com/v1"})
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "https://api.example.com/v1/resource")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.NoError(t, err)
+	assert.Equal(t, "http://proxy.example.com:3128", got.String())
+}
+
+func Test_newClient_wraps_transport_proxy(t *testing.T) {
+	// A clone of http.DefaultTransport carries ProxyFromEnvironment, so the shipped
+	// client must not still be holding it unwrapped.
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	shipped := ctx.(*contextImpl).client.(*http.Client).Transport.(*http.Transport)
+	assert.NotNil(t, shipped.Proxy)
+	assert.NotEqual(t,
+		reflect.ValueOf(http.ProxyFromEnvironment).Pointer(),
+		reflect.ValueOf(shipped.Proxy).Pointer(),
+		"Transport.Proxy must be wrapped, otherwise HTTP_PROXY disables the CIDR check")
+
+	// And the wrapper newClient installs must enforce the blocklist.
+	req, base := proxiedRequest(t, "http://169.254.169.254/latest/meta-data/")
+	client := ctx.(*contextImpl).newClient(&http.Transport{Proxy: base})
+	got, err := client.Transport.(*http.Transport).Proxy(req)
+	assert.Nil(t, got)
+	assert.ErrorContains(t, err, "blocked range 169.254.0.0/16")
+}
+
+func Test_Client_with_ca_bundle_wraps_transport_proxy(t *testing.T) {
+	// Client(caBundle) builds its own transport and so is a second, independent copy
+	// of the same bypass.
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	derived, err := ctx.Client(pemExample)
+	assert.NoError(t, err)
+	transport := derived.(*contextImpl).client.(*http.Client).Transport.(*http.Transport)
+	assert.NotEqual(t,
+		reflect.ValueOf(http.ProxyFromEnvironment).Pointer(),
+		reflect.ValueOf(transport.Proxy).Pointer())
 }
