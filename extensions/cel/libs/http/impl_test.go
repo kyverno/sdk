@@ -1047,3 +1047,88 @@ func originPort(t *testing.T, srv *httptest.Server) string {
 	assert.NoError(t, err)
 	return u.Port()
 }
+
+func Test_matchesAllowlist_canonicalizes_paths(t *testing.T) {
+	// The server receives the un-normalized path and most backends resolve it, so an
+	// entry of "/v1" must not admit anything that canonicalizes outside "/v1".
+	tests := []struct {
+		name  string
+		path  string
+		allow bool
+	}{{
+		name:  "exact match",
+		path:  "/v1",
+		allow: true,
+	}, {
+		name:  "trailing slash",
+		path:  "/v1/",
+		allow: true,
+	}, {
+		name:  "deeper path",
+		path:  "/v1/resource/1",
+		allow: true,
+	}, {
+		name:  "sibling sharing the prefix",
+		path:  "/v10/other",
+		allow: false,
+	}, {
+		name:  "traversal",
+		path:  "/v1/../admin",
+		allow: false,
+	}, {
+		name:  "percent-encoded traversal",
+		path:  "/v1/%2e%2e/admin",
+		allow: false,
+	}, {
+		name:  "double traversal",
+		path:  "/v1/a/../../admin",
+		allow: false,
+	}, {
+		name:  "traversal landing back inside the prefix",
+		path:  "/v1/x/../y",
+		allow: true,
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, err := NewHTTPWithBlocklist(nil, []string{"https://api.example.com/v1"})
+			assert.NoError(t, err)
+			reqURL, err := url.Parse("https://api.example.com" + tt.path)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.allow, ctx.(*contextImpl).matchesAllowlist(reqURL))
+		})
+	}
+}
+
+func Test_validateURL_allowlist_rejects_path_traversal(t *testing.T) {
+	var served string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		served = req.URL.Path
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{srv.URL + "/v1"})
+	assert.NoError(t, err)
+	_, err = ctx.Get(srv.URL+"/v1/../admin", nil)
+	assert.ErrorContains(t, err, "no matching allowlist entry")
+	// The backend is what resolves the traversal, so the request must not reach it.
+	assert.Empty(t, served)
+}
+
+func Test_checkRedirect_allowlist_rejects_encoded_traversal_hop(t *testing.T) {
+	// url.URL.ResolveReference strips plain "../" segments from a Location header, so
+	// the percent-encoded spelling is the form that survives to reach checkRedirect.
+	var served string
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		served = req.URL.Path
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/v1/%2e%2e/admin" })
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{redirector.URL, destination.URL + "/v1"})
+	assert.NoError(t, err)
+	_, err = ctx.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, "no matching allowlist entry")
+	assert.Empty(t, served, "the traversal must not reach the destination at all")
+}

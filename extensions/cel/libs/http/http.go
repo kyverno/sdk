@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 )
@@ -394,6 +395,12 @@ func (r *contextImpl) validateURL(rawURL string) error {
 	return nil
 }
 
+// cleanPath canonicalizes a URL path for comparison: rooted, with "." and ".."
+// segments and duplicate slashes resolved, and any trailing slash removed.
+func cleanPath(p string) string {
+	return path.Clean("/" + strings.TrimPrefix(p, "/"))
+}
+
 func (r *contextImpl) matchesAllowlist(reqURL *url.URL) bool {
 	reqHost := normalizeHost(reqURL.Hostname())
 	reqPort := effectivePort(reqURL)
@@ -411,21 +418,21 @@ func (r *contextImpl) matchesAllowlist(reqURL *url.URL) bool {
 		if entryPath == "" || entryPath == "/" {
 			return true
 		}
-		// Require either an exact path match, or a prefix match that aligns with
-		// a path-segment boundary. This avoids matching "/v10/..." when the
-		// allowlist entry is "/v1".
-		if reqURL.Path == entryPath {
+		// Compare canonical paths. url.Parse leaves "/v1/../admin" — and the
+		// percent-encoded "/v1/%2e%2e/admin", which it decodes to the same thing —
+		// intact in Path, so a raw prefix test admits either for an entry of "/v1"
+		// while the server resolves both to "/admin". path.Clean collapses the
+		// traversal before the comparison.
+		reqPath := cleanPath(reqURL.Path)
+		cleanEntry := cleanPath(entryPath)
+		if reqPath == cleanEntry {
 			return true
 		}
-		if strings.HasPrefix(reqURL.Path, entryPath) {
-			// If the allowlist path ends with "/", treat it as a directory prefix.
-			if entryPath[len(entryPath)-1] == '/' {
-				return true
-			}
-			// Otherwise, require the next character after the prefix to be "/".
-			if len(reqURL.Path) > len(entryPath) && reqURL.Path[len(entryPath)] == '/' {
-				return true
-			}
+		// Require the prefix to align with a path-segment boundary, so an entry of
+		// "/v1" does not admit "/v10". Clean has already stripped any trailing slash
+		// from cleanEntry, so this one rule covers both the "/v1" and "/v1/" forms.
+		if strings.HasPrefix(reqPath, cleanEntry) && len(reqPath) > len(cleanEntry) && reqPath[len(cleanEntry)] == '/' {
+			return true
 		}
 	}
 	return false
