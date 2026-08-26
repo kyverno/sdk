@@ -98,6 +98,9 @@ func TestFetchImageData_IndexPlatformSelection(t *testing.T) {
 			platformChild(t, "linux", "s390x"),
 		},
 		wantErr: "no child with platform linux/amd64",
+	}, {
+		name:    "index holding no images is left to platform selection",
+		wantErr: "no child with platform linux/amd64",
 	}}
 
 	host := startRegistry(t)

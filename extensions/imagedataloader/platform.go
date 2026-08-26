@@ -1,6 +1,7 @@
 package imagedataloader
 
 import (
+	"github.com/google/go-containerregistry/pkg/logs"
 	gcrv1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/partial"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
@@ -13,6 +14,11 @@ const unknownPlatform = "unknown"
 func imageForDescriptor(desc *remote.Descriptor) (gcrv1.Image, error) {
 	index, err := desc.ImageIndex()
 	if err != nil {
+		// ImageIndex rejects a descriptor only on its media type, so this is the ordinary
+		// single manifest case rather than a fault, and there is no index to pick a child
+		// from. Image resolves such a descriptor directly, and returns the same error for
+		// the media types neither call supports, so continuing here hides nothing.
+		logs.Debug.Printf("%s is not an image index, resolving the descriptor directly: %v", desc.Digest, err)
 		return desc.Image()
 	}
 

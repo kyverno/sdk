@@ -61,7 +61,10 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	}
 	img.nameRef = ref
 
-	// fetched before the image, remote.Get does not resolve an index to a single platform
+	// fetch the descriptor rather than the image. remote.Image would resolve an index down to
+	// a single platform here, defaulting to linux/amd64, whereas a descriptor leaves the index
+	// intact so the child can be chosen below. it also carries the digest recorded on the
+	// result, and the raw index manifest exposed to policies.
 	desc, err := remote.Get(ref, img.remoteOpts...)
 	if err != nil {
 		return nil, err
