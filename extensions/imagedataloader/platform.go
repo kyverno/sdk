@@ -27,6 +27,8 @@ func imageForDescriptor(desc *remote.Descriptor) (gcrv1.Image, error) {
 		return nil, err
 	}
 
+	// zero when no child of the index describes an image, more than one when the index is
+	// genuinely multi platform. neither has a single answer, so both keep platform selection
 	if len(images) != 1 {
 		return desc.Image()
 	}
