@@ -37,19 +37,9 @@ func (c *impl) list_of_objects_to_map(args ...ref.Val) ref.Val {
 	}
 	ret := make(map[string]any)
 	for i, entry := range list1 {
-		var (
-			entry1 map[string]any
-			entry2 map[string]any
-			ok     bool
-		)
-
-		// attempt to handle the entry first as a map string any, if it failed try as a map of ref.Val to ref.Val
-		entry1, ok = entry.(map[string]any)
-		if !ok {
-			entry1, err = refValMapToGoMap(entry.(map[any]any))
-			if err != nil {
-				return types.WrapErr(err)
-			}
+		entry1, err := entryToStringMap(entry)
+		if err != nil {
+			return types.WrapErr(err)
 		}
 
 		k, ok := entry1[keyName].(string)
@@ -57,17 +47,38 @@ func (c *impl) list_of_objects_to_map(args ...ref.Val) ref.Val {
 			return types.WrapErr(fmt.Errorf("the passed key name cannot be handled as a string in the key object list"))
 		}
 
-		entry2, ok = list2[i].(map[string]any)
-		if !ok {
-			entry2, err = refValMapToGoMap(list2[i].(map[any]any))
-			if err != nil {
-				return types.WrapErr(fmt.Errorf("object cannot be handled as a map string to any in the value object list"))
-			}
+		entry2, err := entryToStringMap(list2[i])
+		if err != nil {
+			return types.WrapErr(fmt.Errorf("object cannot be handled as a map string to any in the value object list"))
 		}
 
 		ret[k] = entry2[valueName]
 	}
 	return c.NativeToValue(ret)
+}
+
+// Lists built with the CEL "+" operator surface their maps as
+// map[ref.Val]ref.Val instead of map[string]any, so normalize every shape
+// before reading fields.
+func entryToStringMap(entry any) (map[string]any, error) {
+	if m, ok := entry.(map[string]any); ok {
+		return m, nil
+	}
+	if m, ok := entry.(map[any]any); ok {
+		return refValMapToGoMap(m)
+	}
+	if m, ok := entry.(map[ref.Val]ref.Val); ok {
+		resultMap := make(map[string]any, len(m))
+		for k, v := range m {
+			keyStr, ok := k.Value().(string)
+			if !ok {
+				return nil, fmt.Errorf("failed to convert key to a string, %+T", k.Value())
+			}
+			resultMap[keyStr] = v.Value()
+		}
+		return resultMap, nil
+	}
+	return nil, fmt.Errorf("object cannot be handled as a map, %+T", entry)
 }
 
 func refValMapToGoMap(ifaceMap map[any]any) (map[string]any, error) {
