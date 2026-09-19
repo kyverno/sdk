@@ -3,9 +3,15 @@ package registryclient
 import (
 	"testing"
 
+	"github.com/go-logr/logr/funcr"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
 // fixedKeychain always resolves to the same authenticator, regardless of target.
@@ -89,4 +95,60 @@ func TestNew_WithImagePullSecretsWithoutSecretLister(t *testing.T) {
 
 	require.NotNil(t, c)
 	require.NotNil(t, c.Keychain())
+}
+
+// notFoundSecretLister reports every secret as missing, which is the path that
+// emits the skipped-secret debug log.
+type notFoundSecretLister struct{}
+
+func (l notFoundSecretLister) List(labels.Selector) ([]*corev1.Secret, error) { return nil, nil }
+
+func (l notFoundSecretLister) Secrets(namespace string) corev1listers.SecretNamespaceLister {
+	return notFoundSecretNamespaceLister{}
+}
+
+type notFoundSecretNamespaceLister struct{}
+
+func (l notFoundSecretNamespaceLister) List(labels.Selector) ([]*corev1.Secret, error) {
+	return nil, nil
+}
+
+func (l notFoundSecretNamespaceLister) Get(name string) (*corev1.Secret, error) {
+	return nil, k8serrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, name)
+}
+
+// A caller that supplies a logger should see the secret lookups the client makes
+// on its behalf.
+func TestWithLogger_ReceivesKeychainLogs(t *testing.T) {
+	var logged []string
+	logger := funcr.New(
+		func(prefix, args string) { logged = append(logged, args) },
+		funcr.Options{Verbosity: 4},
+	)
+
+	c := New(
+		WithSecretLister(notFoundSecretLister{}, "kyverno"),
+		WithImagePullSecrets("missing-secret"),
+		WithLogger(logger),
+	)
+
+	_, err := c.Keychain().Resolve(testResource("ghcr.io"))
+	require.NoError(t, err)
+
+	require.Len(t, logged, 1)
+	assert.Contains(t, logged[0], "secret not found, skipping")
+	assert.Contains(t, logged[0], "missing-secret")
+}
+
+// Omitting the option must stay safe, since most callers build a client with no
+// options at all.
+func TestNew_WithoutLoggerDoesNotPanic(t *testing.T) {
+	c := New(
+		WithSecretLister(notFoundSecretLister{}, "kyverno"),
+		WithImagePullSecrets("missing-secret"),
+	)
+
+	auth, err := c.Keychain().Resolve(testResource("ghcr.io"))
+	require.NoError(t, err)
+	assert.NotNil(t, auth)
 }
