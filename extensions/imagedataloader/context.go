@@ -71,10 +71,11 @@ func (idc *imageContext) AddImages(ctx context.Context, images []string, authOpt
 
 func (idc *imageContext) Get(ctx context.Context, image string, authOpts []remote.Option, nameOpts []name.Option) (*ImageData, error) {
 	idc.RLock()
-	if data, found := idc.list[image]; found {
+	data, found := idc.list[image]
+	idc.RUnlock()
+	if found {
 		return data, nil
 	}
-	idc.RUnlock()
 
 	data, err := idc.f.FetchImageData(ctx, image, authOpts, nameOpts)
 	if err != nil {
