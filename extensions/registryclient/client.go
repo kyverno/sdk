@@ -53,10 +53,11 @@ func MustRegistryClient() Client {
 }
 
 // SetupGlobalRegistryClient initializes the package-level global Client. imagePullSecrets and
-// regCredHelpers are comma-separated lists, as passed on the command line. Only the first call
+// regCredHelpers are comma-separated lists, as passed on the command line. Any extra options,
+// such as WithLogger, are applied after the ones built from the arguments. Only the first call
 // has any effect; later calls return the client built by the first one.
 func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultNamespace string,
-	imagePullSecrets string, regCredHelpers string, allowInsecure bool) Client {
+	imagePullSecrets string, regCredHelpers string, allowInsecure bool, extra ...Option) Client {
 	once.Do(func() {
 		opts := []Option{WithSecretLister(secretLister, defaultNamespace)}
 		if imagePullSecrets != "" {
@@ -68,6 +69,7 @@ func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultN
 		if allowInsecure {
 			opts = append(opts, WithAllowInsecureRegistry(true))
 		}
+		opts = append(opts, extra...)
 		registryClient = New(opts...)
 	})
 	return registryClient

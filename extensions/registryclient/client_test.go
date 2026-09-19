@@ -1,6 +1,7 @@
 package registryclient
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/go-logr/logr/funcr"
@@ -147,6 +148,47 @@ func TestNew_WithoutLoggerDoesNotPanic(t *testing.T) {
 		WithSecretLister(notFoundSecretLister{}, "kyverno"),
 		WithImagePullSecrets("missing-secret"),
 	)
+
+	auth, err := c.Keychain().Resolve(testResource("ghcr.io"))
+	require.NoError(t, err)
+	assert.NotNil(t, auth)
+}
+
+// resetGlobalRegistryClient lets a test call SetupGlobalRegistryClient from a clean
+// slate and puts the package state back afterwards.
+func resetGlobalRegistryClient(t *testing.T) {
+	t.Helper()
+	once = sync.Once{}
+	registryClient = nil
+	t.Cleanup(func() {
+		once = sync.Once{}
+		registryClient = nil
+	})
+}
+
+// Kyverno builds its global registry client through SetupGlobalRegistryClient and
+// already has a logger at that point, so the caller has to be able to hand it over.
+func TestSetupGlobalRegistryClient_ForwardsCallerOptions(t *testing.T) {
+	resetGlobalRegistryClient(t)
+	var logged []string
+	logger := funcr.New(
+		func(prefix, args string) { logged = append(logged, args) },
+		funcr.Options{Verbosity: 4},
+	)
+
+	c := SetupGlobalRegistryClient(notFoundSecretLister{}, "kyverno", "missing-secret", "", false, WithLogger(logger))
+
+	_, err := c.Keychain().Resolve(testResource("ghcr.io"))
+	require.NoError(t, err)
+	require.Len(t, logged, 1)
+	assert.Contains(t, logged[0], "secret not found, skipping")
+}
+
+// Existing callers pass no options and must keep working, quietly.
+func TestSetupGlobalRegistryClient_WorksWithoutOptions(t *testing.T) {
+	resetGlobalRegistryClient(t)
+
+	c := SetupGlobalRegistryClient(notFoundSecretLister{}, "kyverno", "missing-secret", "", false)
 
 	auth, err := c.Keychain().Resolve(testResource("ghcr.io"))
 	require.NoError(t, err)
