@@ -14,13 +14,13 @@ import (
 
 	"github.com/awslabs/amazon-ecr-credential-helper/ecr-login"
 	"github.com/fluxcd/pkg/oci/auth/azure"
+	"github.com/go-logr/logr"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/authn/github"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/google"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/api/api/policies.kyverno.io/v1alpha1"
-	"github.com/kyverno/kyverno/pkg/logging"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -55,16 +55,17 @@ var (
 type autoRefreshSecrets struct {
 	lister           corev1listers.SecretLister
 	defaultNamespace string
+	logger           logr.Logger
 	imagePullSecrets []string
 }
 
-func RemoteOptsFromIvpolCredentials(lister corev1listers.SecretLister, ivpolCreds v1alpha1.Credentials, defaultNamespace string) ([]remote.Option, []name.Option) {
+func RemoteOptsFromIvpolCredentials(lister corev1listers.SecretLister, ivpolCreds v1alpha1.Credentials, defaultNamespace string, logger logr.Logger) ([]remote.Option, []name.Option) {
 	providers := make([]string, 0, len(ivpolCreds.Providers))
 	for _, p := range ivpolCreds.Providers {
 		providers = append(providers, string(p))
 	}
 
-	authOpts := remoteOptsFromParams(lister, defaultNamespace, ivpolCreds.Secrets, providers)
+	authOpts := remoteOptsFromParams(lister, defaultNamespace, ivpolCreds.Secrets, providers, logger)
 
 	nameOpts := []name.Option{}
 	if ivpolCreds.AllowInsecureRegistry {
@@ -106,28 +107,29 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 	return chains
 }
 
-func NewSecretsKeychain(lister corev1listers.SecretLister, defaultNamespace string, imagePullSecrets ...string) authn.Keychain {
+func NewSecretsKeychain(lister corev1listers.SecretLister, defaultNamespace string, logger logr.Logger, imagePullSecrets ...string) authn.Keychain {
 	return &autoRefreshSecrets{
 		lister:           lister,
 		defaultNamespace: defaultNamespace,
+		logger:           logger,
 		imagePullSecrets: imagePullSecrets,
 	}
 }
 
 func (kc *autoRefreshSecrets) Resolve(resource authn.Resource) (authn.Authenticator, error) {
-	inner, err := generateKeychainForPullSecrets(kc.lister, kc.defaultNamespace, kc.imagePullSecrets...)
+	inner, err := generateKeychainForPullSecrets(kc.lister, kc.defaultNamespace, kc.logger, kc.imagePullSecrets...)
 	if err != nil {
 		return nil, err
 	}
 	return inner.Resolve(resource)
 }
 
-func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace string, secrets, credentialProviders []string) [3]remote.Option {
+func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace string, secrets, credentialProviders []string, logger logr.Logger) [3]remote.Option {
 	ret := DefaultOpts()
 
 	kcs := []authn.Keychain{}
 	if len(secrets) > 0 {
-		kc := NewSecretsKeychain(lister, defaultNamespace, secrets...)
+		kc := NewSecretsKeychain(lister, defaultNamespace, logger, secrets...)
 		kcs = append(kcs, kc)
 	}
 
@@ -146,7 +148,7 @@ func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace st
 
 // generateKeychainForPullSecrets generates keychain by fetching secrets data from imagePullSecrets.
 // Supports namespace/name notation for secrets in any namespace.
-func generateKeychainForPullSecrets(lister corev1listers.SecretLister, defaultNamespace string, imagePullSecrets ...string) (authn.Keychain, error) {
+func generateKeychainForPullSecrets(lister corev1listers.SecretLister, defaultNamespace string, logger logr.Logger, imagePullSecrets ...string) (authn.Keychain, error) {
 	var secrets []corev1.Secret
 	// for each secret
 	for _, imagePullSecret := range imagePullSecrets {
@@ -157,7 +159,7 @@ func generateKeychainForPullSecrets(lister corev1listers.SecretLister, defaultNa
 		} else if !k8serrors.IsNotFound(err) {
 			return nil, err
 		} else {
-			logging.V(4).Info("secret not found, skipping", "namespace", namespace, "name", name)
+			logger.V(4).Info("secret not found, skipping", "namespace", namespace, "name", name)
 		}
 	}
 

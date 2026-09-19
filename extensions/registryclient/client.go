@@ -6,11 +6,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/go-logr/logr"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	gcrremote "github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/kyverno/kyverno/pkg/tracing"
 	"github.com/kyverno/sdk/extensions/regcreds"
+	"github.com/kyverno/sdk/internal/tracing"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 )
@@ -52,10 +53,11 @@ func MustRegistryClient() Client {
 }
 
 // SetupGlobalRegistryClient initializes the package-level global Client. imagePullSecrets and
-// regCredHelpers are comma-separated lists, as passed on the command line. Only the first call
+// regCredHelpers are comma-separated lists, as passed on the command line. Any extra options,
+// such as WithLogger, are applied after the ones built from the arguments. Only the first call
 // has any effect; later calls return the client built by the first one.
 func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultNamespace string,
-	imagePullSecrets string, regCredHelpers string, allowInsecure bool) Client {
+	imagePullSecrets string, regCredHelpers string, allowInsecure bool, extra ...Option) Client {
 	once.Do(func() {
 		opts := []Option{WithSecretLister(secretLister, defaultNamespace)}
 		if imagePullSecrets != "" {
@@ -67,6 +69,7 @@ func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultN
 		if allowInsecure {
 			opts = append(opts, WithAllowInsecureRegistry(true))
 		}
+		opts = append(opts, extra...)
 		registryClient = New(opts...)
 	})
 	return registryClient
@@ -80,6 +83,7 @@ type options struct {
 	credentialHelpers []string
 	allowInsecure     bool
 	keychain          authn.Keychain
+	logger            logr.Logger
 }
 
 // Option configures a Client built by New.
@@ -91,6 +95,14 @@ func WithSecretLister(lister corev1listers.SecretLister, defaultNamespace string
 	return func(o *options) {
 		o.secretLister = lister
 		o.defaultNamespace = defaultNamespace
+	}
+}
+
+// WithLogger configures the logger the client uses to report how it resolved
+// credentials. When it is not set, nothing is logged.
+func WithLogger(logger logr.Logger) Option {
+	return func(o *options) {
+		o.logger = logger
 	}
 }
 
@@ -141,7 +153,7 @@ func WithKeychain(kc authn.Keychain) Option {
 // (local Docker/Podman config, or anonymous). Use WithImagePullSecrets/WithCredentialHelpers
 // for Kubernetes-based credentials, and WithKeychain to layer an existing keychain on top.
 func New(opts ...Option) Client {
-	var o options
+	o := options{logger: logr.Discard()}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&o)
@@ -151,7 +163,7 @@ func New(opts ...Option) Client {
 	// create an array of key chains
 	kcs := []authn.Keychain{}
 	if len(o.imagePullSecrets) > 0 && o.secretLister != nil {
-		kcs = append(kcs, regcreds.NewSecretsKeychain(o.secretLister, o.defaultNamespace, o.imagePullSecrets...))
+		kcs = append(kcs, regcreds.NewSecretsKeychain(o.secretLister, o.defaultNamespace, o.logger, o.imagePullSecrets...))
 	}
 	if len(o.credentialHelpers) > 0 {
 		kcs = append(kcs, regcreds.KeychainsForProviders(o.credentialHelpers...)...)
