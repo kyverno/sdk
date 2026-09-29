@@ -3,6 +3,7 @@ package registryclient
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -84,6 +85,7 @@ type options struct {
 	allowInsecure     bool
 	keychain          authn.Keychain
 	logger            logr.Logger
+	transport         http.RoundTripper
 }
 
 // Option configures a Client built by New.
@@ -127,6 +129,14 @@ func WithCredentialHelpers(providers ...string) Option {
 func WithAllowInsecureRegistry(allow bool) Option {
 	return func(o *options) {
 		o.allowInsecure = allow
+	}
+}
+
+// WithTransport configures the client to use the provided http.RoundTripper for registry requests.
+// If not set, regcreds.DefaultTransport is used.
+func WithTransport(t http.RoundTripper) Option {
+	return func(o *options) {
+		o.transport = t
 	}
 }
 
@@ -180,10 +190,15 @@ func New(opts ...Option) Client {
 		authnKc = authn.NewMultiKeychain(o.keychain, authnKc)
 	}
 
+	transport := o.transport
+	if transport == nil {
+		transport = regcreds.DefaultTransport
+	}
+
 	return &client{
 		allowInsecureRegistry: o.allowInsecure,
 		keychain:              authnKc,
-		transport:             tracing.Transport(regcreds.DefaultTransport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)),
+		transport:             tracing.Transport(transport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)),
 	}
 }
 
