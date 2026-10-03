@@ -54,29 +54,28 @@ func describesImage(desc gcrv1.Descriptor) bool {
 	return desc.Platform.OS != unknownPlatform && desc.Platform.Architecture != unknownPlatform
 }
 
-// hasAmbiguousPlatform reports whether multiple image descriptors target the same
-// OS and architecture but specify different platform versions.
+// hasAmbiguousPlatform reports whether multiple Windows image descriptors target the same
+// OS and architecture but specify different OS versions.
 func hasAmbiguousPlatform(images []gcrv1.Descriptor) bool {
 	if len(images) < 2 {
 		return false
 	}
 
 	first := images[0].Platform
-	if first == nil || first.OSVersion == "" {
+	if first == nil || first.OS != "windows" {
 		return false
 	}
 
-	for _, image := range images[1:] {
+	versions := make(map[string]struct{})
+	for _, image := range images {
 		platform := image.Platform
 		if platform == nil ||
 			platform.OS != first.OS ||
 			platform.Architecture != first.Architecture {
 			return false
 		}
-		if platform.OSVersion != first.OSVersion {
-			return true
-		}
+		versions[platform.OSVersion] = struct{}{}
 	}
 
-	return false
+	return len(versions) > 1
 }
