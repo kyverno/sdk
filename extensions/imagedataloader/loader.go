@@ -71,19 +71,21 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	}
 	img.desc = desc
 
-	remoteImg, err := imageForDescriptor(desc)
+	remoteImg, hasMetadata, err := imageForDescriptor(desc)
 	if err != nil {
 		return nil, err
 	}
 
-	img.Manifest, err = remoteImg.Manifest()
-	if err != nil {
-		return nil, err
-	}
+	if hasMetadata {
+		img.Manifest, err = remoteImg.Manifest()
+		if err != nil {
+			return nil, err
+		}
 
-	img.ConfigData, err = remoteImg.ConfigFile()
-	if err != nil {
-		return nil, err
+		img.ConfigData, err = remoteImg.ConfigFile()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if len(img.Digest) == 0 {
