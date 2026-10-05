@@ -1,12 +1,17 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/cel-go/cel"
@@ -727,4 +732,403 @@ func Test_impl_post_request_with_400_bad_request(t *testing.T) {
 	assert.Equal(t, body["error"], "invalid request")
 	assert.Equal(t, body["code"], "INVALID_DATA")
 	assert.Equal(t, body["statusCode"], http.StatusBadRequest)
+}
+
+func Test_validateURL_blocks_ipv6_encoded_ipv4_metadata_ip(t *testing.T) {
+	// 169.254.169.254 can be spelled as an IPv6 address in several ways that
+	// net.IPNet.Contains does not recognise on its own. Each must still be caught by
+	// the 169.254.0.0/16 entry in the default blocklist.
+	tests := []struct {
+		name string
+		url  string
+	}{{
+		name: "ipv4-mapped",
+		url:  "http://[::ffff:169.254.169.254]/latest/meta-data/",
+	}, {
+		name: "ipv4-compatible",
+		url:  "http://[::169.254.169.254]/latest/meta-data/",
+	}, {
+		name: "nat64 well-known prefix",
+		url:  "http://[64:ff9b::a9fe:a9fe]/latest/meta-data/",
+	}, {
+		name: "6to4",
+		url:  "http://[2002:a9fe:a9fe::]/latest/meta-data/",
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+			assert.NoError(t, err)
+			_, err = ctx.Get(tt.url, nil)
+			assert.ErrorContains(t, err, "blocked range 169.254.0.0/16")
+		})
+	}
+}
+
+func Test_embeddedIPv4(t *testing.T) {
+	tests := []struct {
+		name string
+		ip   string
+		want string
+	}{{
+		name: "ipv4 has nothing embedded",
+		ip:   "169.254.169.254",
+		want: "",
+	}, {
+		name: "ipv4-mapped is already handled by To4",
+		ip:   "::ffff:169.254.169.254",
+		want: "",
+	}, {
+		name: "ipv4-compatible",
+		ip:   "::169.254.169.254",
+		want: "169.254.169.254",
+	}, {
+		name: "nat64",
+		ip:   "64:ff9b::7f00:1",
+		want: "127.0.0.1",
+	}, {
+		name: "6to4",
+		ip:   "2002:7f00:1::1",
+		want: "127.0.0.1",
+	}, {
+		name: "ordinary ipv6",
+		ip:   "2606:4700:4700::1111",
+		want: "",
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := embeddedIPv4(net.ParseIP(tt.ip))
+			if tt.want == "" {
+				assert.Nil(t, got)
+				return
+			}
+			assert.Equal(t, tt.want, got.String())
+		})
+	}
+}
+
+// stubLookupHost replaces the package resolver for the duration of a test.
+func stubLookupHost(t *testing.T, answers map[string][]string) {
+	t.Helper()
+	original := lookupHost
+	t.Cleanup(func() { lookupHost = original })
+	lookupHost = func(_ context.Context, host string) ([]string, error) {
+		if ips, ok := answers[host]; ok {
+			return ips, nil
+		}
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
+}
+
+// proxiedRequest builds the inputs guardedProxy is called with: a request for rawURL and
+// a base resolver that always selects a proxy.
+func proxiedRequest(t *testing.T, rawURL string) (*http.Request, func(*http.Request) (*url.URL, error)) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	assert.NoError(t, err)
+	proxyURL, err := url.Parse("http://proxy.example.com:3128")
+	assert.NoError(t, err)
+	return req, func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+}
+
+func Test_guardedProxy_blocks_literal_ip_in_blocked_range(t *testing.T) {
+	// Without the proxy wrapper, secureDialContext only ever sees proxy.example.com and
+	// the metadata IP is reached through the proxy.
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "http://169.254.169.254/latest/meta-data/")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.Nil(t, got)
+	assert.ErrorContains(t, err, "blocked range 169.254.0.0/16")
+}
+
+func Test_guardedProxy_blocks_hostname_resolving_into_blocked_range(t *testing.T) {
+	stubLookupHost(t, map[string][]string{"metadata.example.com": {"169.254.169.254"}})
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "http://metadata.example.com/latest/meta-data/")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.Nil(t, got)
+	assert.ErrorContains(t, err, "resolves into blocked range 169.254.0.0/16")
+}
+
+func Test_guardedProxy_permits_hostname_outside_blocked_ranges(t *testing.T) {
+	stubLookupHost(t, map[string][]string{"api.example.com": {"93.184.216.34"}})
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "https://api.example.com/v1/resource")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.NoError(t, err)
+	assert.Equal(t, "http://proxy.example.com:3128", got.String())
+}
+
+func Test_guardedProxy_refuses_unresolvable_host_without_allowlist(t *testing.T) {
+	// Nothing has vetted the host and the CIDR check cannot be applied, so refuse.
+	stubLookupHost(t, nil)
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "https://api.example.com/v1/resource")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.Nil(t, got)
+	assert.ErrorContains(t, err, "cannot be resolved to verify it is not in a blocked range")
+}
+
+func Test_guardedProxy_permits_unresolvable_host_with_allowlist(t *testing.T) {
+	// Clusters that egress through a proxy commonly cannot resolve external names
+	// in-pod. An allowlist entry is an operator saying the target is sanctioned.
+	stubLookupHost(t, nil)
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, []string{"https://api.example.com/v1"})
+	assert.NoError(t, err)
+	req, base := proxiedRequest(t, "https://api.example.com/v1/resource")
+	got, err := ctx.(*contextImpl).guardedProxy(base)(req)
+	assert.NoError(t, err)
+	assert.Equal(t, "http://proxy.example.com:3128", got.String())
+}
+
+func Test_newClient_wraps_transport_proxy(t *testing.T) {
+	// A clone of http.DefaultTransport carries ProxyFromEnvironment, so the shipped
+	// client must not still be holding it unwrapped.
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	shipped := ctx.(*contextImpl).client.(*http.Client).Transport.(*http.Transport)
+	assert.NotNil(t, shipped.Proxy)
+	assert.NotEqual(t,
+		reflect.ValueOf(http.ProxyFromEnvironment).Pointer(),
+		reflect.ValueOf(shipped.Proxy).Pointer(),
+		"Transport.Proxy must be wrapped, otherwise HTTP_PROXY disables the CIDR check")
+
+	// And the wrapper newClient installs must enforce the blocklist.
+	req, base := proxiedRequest(t, "http://169.254.169.254/latest/meta-data/")
+	client := ctx.(*contextImpl).newClient(&http.Transport{Proxy: base})
+	got, err := client.Transport.(*http.Transport).Proxy(req)
+	assert.Nil(t, got)
+	assert.ErrorContains(t, err, "blocked range 169.254.0.0/16")
+}
+
+func Test_Client_with_ca_bundle_wraps_transport_proxy(t *testing.T) {
+	// Client(caBundle) builds its own transport and so is a second, independent copy
+	// of the same bypass.
+	ctx, err := NewHTTPWithBlocklist(DefaultBlockedCIDRs, nil)
+	assert.NoError(t, err)
+	derived, err := ctx.Client(pemExample)
+	assert.NoError(t, err)
+	transport := derived.(*contextImpl).client.(*http.Client).Transport.(*http.Transport)
+	assert.NotEqual(t,
+		reflect.ValueOf(http.ProxyFromEnvironment).Pointer(),
+		reflect.ValueOf(transport.Proxy).Pointer())
+}
+
+// redirectServer serves a 302 to target on "/" and a JSON body everywhere else.
+func redirectServer(t *testing.T, target func() string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/" {
+			http.Redirect(w, req, target(), http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func Test_checkRedirect_refuses_hop_to_blocklisted_hostname(t *testing.T) {
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(origin.Close)
+	// Resolve the blocked hostname to the origin server so that, unguarded, the hop
+	// really does reach it and return its body. A CIDR is configured alongside the
+	// hostnames so the resolver the stub replaces is the one actually used.
+	stubLookupHost(t, map[string][]string{"metadata.google.internal": {"127.0.0.1"}})
+	redirector := redirectServer(t, func() string {
+		return "http://metadata.google.internal:" + originPort(t, origin) + "/computeMetadata/v1/"
+	})
+
+	ctx, err := NewHTTPWithBlocklist([]string{"metadata.google.internal", "169.254.0.0/16"}, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, `hostname "metadata.google.internal" is on the blocklist`)
+}
+
+func Test_checkRedirect_refuses_hop_into_blocked_cidr(t *testing.T) {
+	// secureDialContext already covers this hop, since it sits in the transport. This
+	// is a regression test for that, not for checkRedirect.
+	redirector := redirectServer(t, func() string { return "http://169.254.169.254/latest/meta-data/" })
+	ctx, err := NewHTTPWithBlocklist([]string{"169.254.0.0/16"}, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, "blocked range 169.254.0.0/16")
+}
+
+func Test_checkRedirect_follows_hop_to_permitted_host(t *testing.T) {
+	// A security fix must not stop legitimate redirects being followed.
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "ok"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/v1/resource" })
+
+	ctx, err := NewHTTPWithBlocklist([]string{"169.254.0.0/16"}, nil)
+	assert.NoError(t, err)
+	result, err := ctx.Get(redirector.URL+"/", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, "ok", result.(map[string]any)["body"])
+}
+
+func Test_checkRedirect_follows_hop_permitted_by_the_allowlist(t *testing.T) {
+	// Guards against over-blocking, which is the fix's main regression risk: a hop that
+	// the allowlist permits must still be followed and its body returned.
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "ok"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/v1/resource" })
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{redirector.URL, destination.URL})
+	assert.NoError(t, err)
+	result, err := ctx.Get(redirector.URL+"/", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, "ok", result.(map[string]any)["body"])
+}
+
+func Test_checkRedirect_bounds_redirect_loops(t *testing.T) {
+	var hits atomic.Int32
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, req, srv.URL+"/", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, err := NewHTTPWithBlocklist([]string{"169.254.0.0/16"}, nil)
+	assert.NoError(t, err)
+	_, err = ctx.Get(srv.URL+"/", nil)
+	assert.ErrorContains(t, err, "stopped after 10 redirects")
+	// via already contains the initial request, so the tenth response is the one
+	// refused. This is exactly what net/http's own default policy counts.
+	assert.Equal(t, int32(maxRedirects), hits.Load())
+}
+
+func Test_checkRedirect_allowlist_is_not_escapable(t *testing.T) {
+	// The most serious of the three: unguarded, this returns the off-allowlist body
+	// straight back to the caller.
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/steal" })
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{redirector.URL})
+	assert.NoError(t, err)
+	_, err = ctx.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, "no matching allowlist entry")
+}
+
+func Test_checkRedirect_applies_to_client_with_ca_bundle(t *testing.T) {
+	// Client(caBundle) builds its own client and must carry the same policy. The
+	// narrowed RootCAs is irrelevant over plain http.
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/steal" })
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{redirector.URL})
+	assert.NoError(t, err)
+	derived, err := ctx.Client(pemExample)
+	assert.NoError(t, err)
+	_, err = derived.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, "no matching allowlist entry")
+}
+
+func originPort(t *testing.T, srv *httptest.Server) string {
+	t.Helper()
+	u, err := url.Parse(srv.URL)
+	assert.NoError(t, err)
+	return u.Port()
+}
+
+func Test_matchesAllowlist_canonicalizes_paths(t *testing.T) {
+	// The server receives the un-normalized path and most backends resolve it, so an
+	// entry of "/v1" must not admit anything that canonicalizes outside "/v1".
+	tests := []struct {
+		name  string
+		path  string
+		allow bool
+	}{{
+		name:  "exact match",
+		path:  "/v1",
+		allow: true,
+	}, {
+		name:  "trailing slash",
+		path:  "/v1/",
+		allow: true,
+	}, {
+		name:  "deeper path",
+		path:  "/v1/resource/1",
+		allow: true,
+	}, {
+		name:  "sibling sharing the prefix",
+		path:  "/v10/other",
+		allow: false,
+	}, {
+		name:  "traversal",
+		path:  "/v1/../admin",
+		allow: false,
+	}, {
+		name:  "percent-encoded traversal",
+		path:  "/v1/%2e%2e/admin",
+		allow: false,
+	}, {
+		name:  "double traversal",
+		path:  "/v1/a/../../admin",
+		allow: false,
+	}, {
+		name:  "traversal landing back inside the prefix",
+		path:  "/v1/x/../y",
+		allow: true,
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, err := NewHTTPWithBlocklist(nil, []string{"https://api.example.com/v1"})
+			assert.NoError(t, err)
+			reqURL, err := url.Parse("https://api.example.com" + tt.path)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.allow, ctx.(*contextImpl).matchesAllowlist(reqURL))
+		})
+	}
+}
+
+func Test_validateURL_allowlist_rejects_path_traversal(t *testing.T) {
+	var served string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		served = req.URL.Path
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{srv.URL + "/v1"})
+	assert.NoError(t, err)
+	_, err = ctx.Get(srv.URL+"/v1/../admin", nil)
+	assert.ErrorContains(t, err, "no matching allowlist entry")
+	// The backend is what resolves the traversal, so the request must not reach it.
+	assert.Empty(t, served)
+}
+
+func Test_checkRedirect_allowlist_rejects_encoded_traversal_hop(t *testing.T) {
+	// url.URL.ResolveReference strips plain "../" segments from a Location header, so
+	// the percent-encoded spelling is the form that survives to reach checkRedirect.
+	var served string
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		served = req.URL.Path
+		_, _ = w.Write([]byte(`{"body": "secret"}`))
+	}))
+	t.Cleanup(destination.Close)
+	redirector := redirectServer(t, func() string { return destination.URL + "/v1/%2e%2e/admin" })
+
+	ctx, err := NewHTTPWithBlocklist(nil, []string{redirector.URL, destination.URL + "/v1"})
+	assert.NoError(t, err)
+	_, err = ctx.Get(redirector.URL+"/", nil)
+	assert.ErrorContains(t, err, "no matching allowlist entry")
+	assert.Empty(t, served, "the traversal must not reach the destination at all")
 }

@@ -512,3 +512,78 @@ resource.post(
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "permission denied")
 }
+
+func Test_impl_convert_to_gvr_string_string(t *testing.T) {
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	assert.NotNil(t, base)
+
+	ctx := Context{
+		&ContextMock{
+			ToGVRFunc: func(apiVersion, kind string) (*schema.GroupVersionResource, error) {
+				return &schema.GroupVersionResource{Version: "v1", Resource: "pods"}, nil
+			},
+			GetResourceFunc: func(apiVersion, resource, namespace, name string) (*unstructured.Unstructured, error) {
+				return &unstructured.Unstructured{
+					Object: map[string]any{
+						"apiVersion": apiVersion,
+						"kind":       "Pod",
+						"metadata": map[string]any{
+							"name":      name,
+							"namespace": namespace,
+						},
+					},
+				}, nil
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		namespace string
+		expr      string
+		want      ref.Val
+	}{
+		{
+			name: "pascal",
+			expr: `resource.ToGVR("v1", "Pod")`,
+			want: types.DefaultTypeAdapter.NativeToValue(true),
+		},
+		{
+			name: "camel",
+			expr: `resource.toGVR("v1", "Pod")`,
+			want: types.DefaultTypeAdapter.NativeToValue(true),
+		},
+		{
+			name: "passed_to_get",
+			expr: `resource.get(resource.ToGVR("v1", "Pod"), "default", "nginx").metadata.name`,
+			want: types.String("nginx"),
+		},
+		{
+			name:      "namespaced_passed_to_get",
+			namespace: "default",
+			expr:      `resource.get(resource.ToGVR("v1", "Pod"), "nginx").metadata.name`,
+			want:      types.String("nginx"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env, err := base.Extend(
+				Lib(&ctx, tt.namespace, version.MajorMinor(1, 18)),
+			)
+			assert.NoError(t, err)
+			expr := tt.expr
+			if tt.want.Type() == types.BoolType {
+				// the GVR is opaque to CEL, so check that it evaluates without error
+				expr = expr + ` != null`
+			}
+			ast, issues := env.Compile(expr)
+			assert.Nil(t, issues)
+			prog, err := env.Program(ast)
+			assert.NoError(t, err)
+			out, _, err := prog.Eval(map[string]any{})
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, out)
+		})
+	}
+}
