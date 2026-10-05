@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -263,21 +262,16 @@ func (i *ImageData) FetchReferrerData(desc gcrv1.Descriptor) ([]byte, *gcrv1.Des
 		Size:      size,
 	}
 
-	reader, err := layer.Uncompressed()
+	b, err := readLayerLimited(layer, maxPayloadSize)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer func() {
-		_ = reader.Close()
-	}()
-
-	b, err := io.ReadAll(io.LimitReader(reader, maxPayloadSize))
 
 	i.referrersData[desc.Digest.String()] = referrerData{
 		data:            b,
 		layerDescriptor: layerDesc,
 	}
-	return b, layerDesc, err
+	return b, layerDesc, nil
 }
 
 func (i *ImageData) AddVerifiedReferrer(desc gcrv1.Descriptor) {
