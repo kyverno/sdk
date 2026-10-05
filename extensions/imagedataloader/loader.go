@@ -80,6 +80,11 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 		return nil, err
 	}
 
+	// an attacker-authored config descriptor otherwise sizes this read
+	if img.Manifest.Config.Size > maxPayloadSize {
+		return nil, fmt.Errorf("config size %d exceeds %d", img.Manifest.Config.Size, maxPayloadSize)
+	}
+
 	img.ConfigData, err = remoteImg.ConfigFile()
 	if err != nil {
 		return nil, err
