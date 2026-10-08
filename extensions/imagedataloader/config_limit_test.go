@@ -66,7 +66,7 @@ func pushImageWithConfig(t *testing.T, configSize int) string {
 }
 
 func TestFetchImageData_RejectsOversizedConfig(t *testing.T) {
-	ref := pushImageWithConfig(t, int(maxPayloadSize)+1)
+	ref := pushImageWithConfig(t, int(defaultPayloadLimit)+1)
 	idf, err := New(nil, nil, nil)
 	require.NoError(t, err)
 
