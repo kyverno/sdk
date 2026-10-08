@@ -1,6 +1,9 @@
 package registryclient
 
 import (
+	"context"
+	"errors"
+	"net/http"
 	"sync"
 	"testing"
 
@@ -193,4 +196,26 @@ func TestSetupGlobalRegistryClient_WorksWithoutOptions(t *testing.T) {
 	auth, err := c.Keychain().Resolve(testResource("ghcr.io"))
 	require.NoError(t, err)
 	assert.NotNil(t, auth)
+}
+
+type sentinelTransport struct {
+	called bool
+}
+
+func (t *sentinelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.called = true
+	return nil, errors.New("sentinel hit")
+}
+
+func TestWithTransport_Wiring(t *testing.T) {
+	sentinel := &sentinelTransport{}
+	c := New(WithTransport(sentinel))
+
+	_, err := c.FetchImageDescriptor(context.Background(), "example.com/repo:latest")
+	
+	// The request should fail, but it should fail specifically because our sentinel
+	// RoundTripper aborted it, proving the transport was wired correctly.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sentinel hit")
+	assert.True(t, sentinel.called)
 }
