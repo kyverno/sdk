@@ -123,3 +123,33 @@ func TestReadLayerLimited_ClosesReader(t *testing.T) {
 		})
 	}
 }
+
+func TestPayloadLimit_DefaultAndRaiseOnly(t *testing.T) {
+	restore := PayloadLimit()
+	t.Cleanup(func() { SetPayloadLimit(restore) })
+
+	assert.Equal(t, defaultPayloadLimit, PayloadLimit())
+
+	SetPayloadLimit(50 * 1000 * 1000)
+	assert.Equal(t, int64(50*1000*1000), PayloadLimit())
+
+	// A non-positive value is how a caller spells "leave the default alone".
+	SetPayloadLimit(0)
+	assert.Equal(t, int64(50*1000*1000), PayloadLimit())
+	SetPayloadLimit(-1)
+	assert.Equal(t, int64(50*1000*1000), PayloadLimit())
+}
+
+// A payload between the default and a raised limit must become readable, which is
+// the large SBOM attestation case the compile-time constant refused outright.
+func TestReadLayerLimited_RaisedLimitAcceptsLargerPayload(t *testing.T) {
+	const payload = 12 * 1000 * 1000
+	blob := gzipBytes(t, payload)
+
+	_, err := readLayerLimited(layerFrom(t, blob, nil), defaultPayloadLimit)
+	require.Error(t, err, "the default must still refuse it")
+
+	b, err := readLayerLimited(layerFrom(t, blob, nil), 20*1000*1000)
+	require.NoError(t, err)
+	assert.Len(t, b, payload)
+}

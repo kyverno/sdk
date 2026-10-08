@@ -16,8 +16,36 @@ import (
 
 const (
 	maxReferrersCount = 50
-	maxPayloadSize    = int64(10 * 1000 * 1000) // 10 MB
+	// defaultPayloadLimit bounds a referrer payload read. It is a limit on
+	// decompressed bytes, so a payload that compresses well -- an SBOM attestation
+	// is the usual case -- can exceed it while still being small on the wire.
+	defaultPayloadLimit = int64(10 * 1000 * 1000) // 10 MB
+	// maxReferrersIndexSize bounds the referrers index body before it is
+	// unmarshalled. go-containerregistry has already fetched and buffered the body
+	// by the time Referrers returns, so this cannot stop the download -- what it
+	// stops is the unmarshal, which is where the cost lands: a 34 MB index expands
+	// to roughly 400 MB of Go structs. A legitimate index of maxReferrersCount
+	// entries is a few tens of kilobytes.
+	maxReferrersIndexSize = int64(1000 * 1000) // 1 MB
 )
+
+// payloadLimit is raise-only configuration for callers that sign payloads above
+// the default. Bounding these reads is what stops a decompression bomb, so the
+// limit can be raised but not removed.
+var payloadLimit = defaultPayloadLimit
+
+// PayloadLimit returns the configured bound for referrer payload reads.
+func PayloadLimit() int64 {
+	return payloadLimit
+}
+
+// SetPayloadLimit overrides the payload bound. Call it once at startup, before
+// any fetch. A non-positive value leaves the default in place.
+func SetPayloadLimit(n int64) {
+	if n > 0 {
+		payloadLimit = n
+	}
+}
 
 type Fetcher interface {
 	FetchImageData(ctx context.Context, image string, options ...Option) (*ImageData, error)
@@ -73,8 +101,8 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, opt
 	}
 
 	// an attacker-authored config descriptor otherwise sizes this read
-	if img.Manifest.Config.Size > maxPayloadSize {
-		return nil, fmt.Errorf("config size %d exceeds %d", img.Manifest.Config.Size, maxPayloadSize)
+	if img.Manifest.Config.Size > defaultPayloadLimit {
+		return nil, fmt.Errorf("config size %d exceeds %d", img.Manifest.Config.Size, defaultPayloadLimit)
 	}
 
 	img.ConfigData, err = remoteImg.ConfigFile()
@@ -275,7 +303,7 @@ func (i *ImageData) FetchReferrerData(desc gcrv1.Descriptor) ([]byte, *gcrv1.Des
 		Size:      size,
 	}
 
-	b, err := readLayerLimited(layer, maxPayloadSize)
+	b, err := readLayerLimited(layer, payloadLimit)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -371,6 +399,16 @@ func (i *ImageData) fetchReferrersFromRemote(digest string) (*gcrv1.IndexManifes
 	referrers, err := remote.Referrers(i.nameRef.Context().Digest(digest), i.remoteOpts...)
 	if err != nil {
 		return nil, err
+	}
+
+	// The count cap below runs on the parsed index, so it cannot prevent the
+	// allocation it exists to prevent. Bound the body first.
+	raw, err := referrers.RawManifest()
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > maxReferrersIndexSize {
+		return nil, fmt.Errorf("failed to fetch referrers: index size %d exceeds %d", len(raw), maxReferrersIndexSize)
 	}
 
 	referrersDescs, err := referrers.IndexManifest()
