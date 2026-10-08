@@ -124,20 +124,27 @@ func TestReadLayerLimited_ClosesReader(t *testing.T) {
 	}
 }
 
-func TestPayloadLimit_DefaultAndRaiseOnly(t *testing.T) {
+func TestPayloadLimit_SetChangesButNeverDisables(t *testing.T) {
 	restore := PayloadLimit()
 	t.Cleanup(func() { SetPayloadLimit(restore) })
 
 	assert.Equal(t, defaultPayloadLimit, PayloadLimit())
 
+	// A larger positive value raises the bound.
 	SetPayloadLimit(50 * 1000 * 1000)
 	assert.Equal(t, int64(50*1000*1000), PayloadLimit())
 
-	// A non-positive value is how a caller spells "leave the default alone".
+	// A smaller positive value tightens it: the bound can move in either
+	// direction, which is the documented contract.
+	SetPayloadLimit(1 * 1000 * 1000)
+	assert.Equal(t, int64(1*1000*1000), PayloadLimit())
+
+	// A non-positive value is how a caller spells "leave the current bound
+	// alone"; the bound can never be disabled.
 	SetPayloadLimit(0)
-	assert.Equal(t, int64(50*1000*1000), PayloadLimit())
+	assert.Equal(t, int64(1*1000*1000), PayloadLimit())
 	SetPayloadLimit(-1)
-	assert.Equal(t, int64(50*1000*1000), PayloadLimit())
+	assert.Equal(t, int64(1*1000*1000), PayloadLimit())
 }
 
 // A payload between the default and a raised limit must become readable, which is
