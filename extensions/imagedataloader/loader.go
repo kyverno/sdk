@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -17,8 +16,38 @@ import (
 
 const (
 	maxReferrersCount = 50
-	maxPayloadSize    = int64(10 * 1000 * 1000) // 10 MB
+	// defaultPayloadLimit bounds a referrer payload read. It is a limit on
+	// decompressed bytes, so a payload that compresses well -- an SBOM attestation
+	// is the usual case -- can exceed it while still being small on the wire.
+	defaultPayloadLimit = int64(10 * 1000 * 1000) // 10 MB
+	// maxReferrersIndexSize bounds the referrers index body before it is
+	// unmarshalled. go-containerregistry has already fetched and buffered the body
+	// by the time Referrers returns, so this cannot stop the download -- what it
+	// stops is the unmarshal, which is where the cost lands: a 34 MB index expands
+	// to roughly 400 MB of Go structs. A legitimate index of maxReferrersCount
+	// entries is a few tens of kilobytes.
+	maxReferrersIndexSize = int64(1000 * 1000) // 1 MB
 )
+
+// payloadLimit is configuration for callers whose payloads do not fit the
+// default. Bounding these reads is what stops a decompression bomb, so the limit
+// can be changed but never disabled.
+var payloadLimit = defaultPayloadLimit
+
+// PayloadLimit returns the configured bound for referrer payload reads.
+func PayloadLimit() int64 {
+	return payloadLimit
+}
+
+// SetPayloadLimit overrides the payload bound. Call it once at startup, before
+// any fetch. A non-positive value leaves the current limit in place, so the bound
+// cannot be disabled; a smaller positive value tightens it, which will refuse
+// payloads that previously read.
+func SetPayloadLimit(n int64) {
+	if n > 0 {
+		payloadLimit = n
+	}
+}
 
 type Fetcher interface {
 	FetchImageData(ctx context.Context, image string, options ...Option) (*ImageData, error)
@@ -71,6 +100,11 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, opt
 	img.Manifest, err = remoteImg.Manifest()
 	if err != nil {
 		return nil, err
+	}
+
+	// an attacker-authored config descriptor otherwise sizes this read
+	if img.Manifest.Config.Size > defaultPayloadLimit {
+		return nil, fmt.Errorf("config size %d exceeds %d", img.Manifest.Config.Size, defaultPayloadLimit)
 	}
 
 	img.ConfigData, err = remoteImg.ConfigFile()
@@ -271,21 +305,16 @@ func (i *ImageData) FetchReferrerData(desc gcrv1.Descriptor) ([]byte, *gcrv1.Des
 		Size:      size,
 	}
 
-	reader, err := layer.Uncompressed()
+	b, err := readLayerLimited(layer, payloadLimit)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer func() {
-		_ = reader.Close()
-	}()
-
-	b, err := io.ReadAll(io.LimitReader(reader, maxPayloadSize))
 
 	i.referrersData[desc.Digest.String()] = referrerData{
 		data:            b,
 		layerDescriptor: layerDesc,
 	}
-	return b, layerDesc, err
+	return b, layerDesc, nil
 }
 
 func (i *ImageData) AddVerifiedReferrer(desc gcrv1.Descriptor) {
@@ -374,7 +403,7 @@ func (i *ImageData) fetchReferrersFromRemote(digest string) (*gcrv1.IndexManifes
 		return nil, err
 	}
 
-	referrersDescs, err := referrers.IndexManifest()
+	referrersDescs, err := referrersIndexManifest(referrers)
 	if err != nil {
 		return nil, err
 	}
@@ -385,4 +414,25 @@ func (i *ImageData) fetchReferrersFromRemote(digest string) (*gcrv1.IndexManifes
 	}
 
 	return referrersDescs, nil
+}
+
+// referrersIndex is the part of gcrv1.ImageIndex the bound needs: the buffered
+// body and the unmarshal it guards.
+type referrersIndex interface {
+	RawManifest() ([]byte, error)
+	IndexManifest() (*gcrv1.IndexManifest, error)
+}
+
+// referrersIndexManifest unmarshals a referrers index only after its body fits
+// the limit. The count cap in fetchReferrersFromRemote runs on the parsed index,
+// so it cannot prevent the allocation it exists to prevent; this can.
+func referrersIndexManifest(index referrersIndex) (*gcrv1.IndexManifest, error) {
+	raw, err := index.RawManifest()
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > maxReferrersIndexSize {
+		return nil, fmt.Errorf("failed to fetch referrers: index size %d exceeds %d", len(raw), maxReferrersIndexSize)
+	}
+	return index.IndexManifest()
 }
