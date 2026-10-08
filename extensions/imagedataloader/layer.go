@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"math"
 
 	gcrv1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/klauspost/compress/zstd"
@@ -59,7 +60,13 @@ func readLayerLimited(layer gcrv1.Layer, maxSize int64) ([]byte, error) {
 		reader = br
 	}
 
-	b, err := io.ReadAll(io.LimitReader(reader, maxSize+1))
+	// Read one byte past the limit to tell "exactly at the limit" from "over it",
+	// without letting maxSize+1 wrap when maxSize is at the top of the range.
+	probe := maxSize
+	if probe < math.MaxInt64 {
+		probe++
+	}
+	b, err := io.ReadAll(io.LimitReader(reader, probe))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read layer: %w", err)
 	}
