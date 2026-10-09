@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -205,7 +204,6 @@ func isACRRegistry(input string) bool {
 		return false
 	}
 
-	acrRE := regexp.MustCompile(`.*\.azurecr\.io|.*\.azurecr\.cn|.*\.azurecr\.de|.*\.azurecr\.us`)
-	matches := acrRE.FindStringSubmatch(serverURL.Hostname())
-	return len(matches) != 0
+	host := strings.ToLower(strings.TrimSuffix(serverURL.Hostname(), "."))
+	return azure.ValidHost(host)
 }
