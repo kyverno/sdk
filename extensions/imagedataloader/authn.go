@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 	"net/url"
-	"regexp"
+	"strings"
 
 	"github.com/awslabs/amazon-ecr-credential-helper/ecr-login"
 	"github.com/fluxcd/pkg/oci/auth/azure"
@@ -18,7 +18,6 @@ import (
 var (
 	AnonymousKeychain authn.Keychain = anonymousKeyChain{}
 	AzureKeychain     authn.Keychain = azureKeyChain{}
-	acrRE                            = regexp.MustCompile(`.*\.azurecr\.io|.*\.azurecr\.cn|.*\.azurecr\.de|.*\.azurecr\.us`)
 )
 
 func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
@@ -93,6 +92,6 @@ func isACRRegistry(input string) bool {
 	if err != nil {
 		return false
 	}
-	matches := acrRE.FindStringSubmatch(serverURL.Hostname())
-	return len(matches) != 0
+	host := strings.ToLower(strings.TrimSuffix(serverURL.Hostname(), "."))
+	return azure.ValidHost(host)
 }
