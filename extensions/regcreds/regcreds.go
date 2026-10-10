@@ -21,6 +21,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/google"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/kyverno/api/api/policies.kyverno.io/v1alpha1"
+	aliacr "github.com/mozillazg/docker-credential-acr-helper/pkg/credhelper"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -103,6 +104,9 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 	}
 	if helpers.Has("github") {
 		chains = append(chains, github.Keychain)
+	}
+	if helpers.Has("alibabacloud") {
+		chains = append(chains, authn.NewKeychainFromHelper(aliacr.NewACRHelper().WithLoggerOut(io.Discard)))
 	}
 	return chains
 }
