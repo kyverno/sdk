@@ -111,8 +111,13 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	}
 
 	// an attacker-authored config descriptor otherwise sizes this read
-	if img.Manifest.Config.Size > defaultPayloadLimit {
-		return nil, fmt.Errorf("config size %d exceeds %d", img.Manifest.Config.Size, defaultPayloadLimit)
+	// A declared size of -1 means "unknown", which turns off go-containerregistry's
+	// own bound on the response body, so require a real size. The limit has to be
+	// the configured one, or raising it leaves this read behind.
+	if size := img.Manifest.Config.Size; size <= 0 {
+		return nil, fmt.Errorf("config size %d is not a valid declared size", size)
+	} else if limit := PayloadLimit(); size > limit {
+		return nil, fmt.Errorf("config size %d exceeds %d", size, limit)
 	}
 
 	img.ConfigData, err = remoteImg.ConfigFile()

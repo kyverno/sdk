@@ -27,6 +27,13 @@ func readLayerLimited(layer gcrv1.Layer, maxSize int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A negative size means the descriptor declares no size, which is also what
+	// turns off go-containerregistry's own bound on the response body. The output
+	// cap below still holds the decompressed result down, but nothing then bounds
+	// the compressed input the decoder is fed.
+	if size < 0 {
+		return nil, fmt.Errorf("layer declares an unknown size")
+	}
 	if size > maxSize {
 		return nil, fmt.Errorf("layer size %d exceeds %d", size, maxSize)
 	}

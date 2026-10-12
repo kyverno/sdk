@@ -17,6 +17,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func declaredOrReal(real, override int64) int64 {
+	if override != 0 {
+		return override
+	}
+	return real
+}
+
 type rawManifestTaggable struct{ raw []byte }
 
 func (r rawManifestTaggable) RawManifest() ([]byte, error) { return r.raw, nil }
@@ -26,6 +33,13 @@ func (r rawManifestTaggable) MediaType() (types.MediaType, error) {
 
 // pushImageWithConfig publishes an image whose config blob is configSize bytes and returns its tagged ref.
 func pushImageWithConfig(t *testing.T, configSize int) string {
+	t.Helper()
+	return pushImageWithDeclaredConfigSize(t, configSize, 0)
+}
+
+// pushImageWithDeclaredConfigSize publishes an image whose config blob is configSize
+// bytes while its manifest declares declaredSize, or the real size when that is 0.
+func pushImageWithDeclaredConfigSize(t *testing.T, configSize int, declaredSize int64) string {
 	t.Helper()
 	srv := httptest.NewServer(registry.New())
 	t.Cleanup(srv.Close)
@@ -54,7 +68,7 @@ func pushImageWithConfig(t *testing.T, configSize int) string {
 		"config": map[string]any{
 			"mediaType": string(types.DockerConfigJSON),
 			"digest":    cfgDigest.String(),
-			"size":      cfgSize,
+			"size":      declaredOrReal(cfgSize, declaredSize),
 		},
 		"layers": []any{},
 	})
@@ -74,6 +88,37 @@ func TestFetchImageData_RejectsOversizedConfig(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "config size")
 	assert.Contains(t, err.Error(), "exceeds")
+}
+
+// A declared size of -1 is go-containerregistry's "unknown", which switches off its
+// own bound on the body, so the whole blob is buffered and the digest only checked at
+// EOF. A "> limit" check lets it through.
+func TestFetchImageData_RejectsUnknownConfigSize(t *testing.T) {
+	ref := pushImageWithDeclaredConfigSize(t, 4096, -1)
+	idf, err := New(nil, nil, nil)
+	require.NoError(t, err)
+
+	_, err = idf.FetchImageData(context.Background(), ref, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a valid declared size")
+}
+
+// The config read has to follow SetPayloadLimit like the referrer read does.
+func TestFetchImageData_ConfigHonoursConfiguredPayloadLimit(t *testing.T) {
+	restore := PayloadLimit()
+	t.Cleanup(func() { SetPayloadLimit(restore) })
+
+	ref := pushImageWithConfig(t, int(defaultPayloadLimit)+1)
+	idf, err := New(nil, nil, nil)
+	require.NoError(t, err)
+
+	_, err = idf.FetchImageData(context.Background(), ref, nil, nil)
+	require.Error(t, err, "refused at the default limit")
+
+	SetPayloadLimit(defaultPayloadLimit * 4)
+	img, err := idf.FetchImageData(context.Background(), ref, nil, nil)
+	require.NoError(t, err, "a raised limit must reach the config read")
+	require.NotNil(t, img)
 }
 
 func TestFetchImageData_AcceptsNormalConfig(t *testing.T) {

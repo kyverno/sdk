@@ -55,6 +55,11 @@ func layerFrom(t *testing.T, blob []byte, closed *bool) gcrv1.Layer {
 	return l
 }
 
+// unknownSizeLayer reports the descriptor size as unknown, as a manifest may declare it.
+type unknownSizeLayer struct{ gcrv1.Layer }
+
+func (unknownSizeLayer) Size() (int64, error) { return -1, nil }
+
 func gzipBytes(t *testing.T, n int) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -103,6 +108,20 @@ func TestReadLayerLimited_ZstdOutputTooLarge(t *testing.T) {
 	_, err := readLayerLimited(layerFrom(t, blob, nil), testMaxSize)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "uncompressed layer size exceeds")
+}
+
+func TestReadLayerLimited_RejectsUnknownDeclaredSize(t *testing.T) {
+	l := unknownSizeLayer{Layer: layerFrom(t, gzipBytes(t, 16), nil)}
+	b, err := readLayerLimited(l, 1024)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown size")
+	assert.Nil(t, b)
+}
+
+func TestReadLayerLimited_AllowsZeroLengthLayer(t *testing.T) {
+	b, err := readLayerLimited(layerFrom(t, nil, nil), 1024)
+	require.NoError(t, err)
+	assert.Empty(t, b)
 }
 
 func TestReadLayerLimited_CompressedTooLarge(t *testing.T) {
