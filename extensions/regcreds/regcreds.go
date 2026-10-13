@@ -6,13 +6,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/awslabs/amazon-ecr-credential-helper/ecr-login"
-	"github.com/fluxcd/pkg/oci/auth/azure"
 	"github.com/go-logr/logr"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/authn/github"
@@ -31,7 +29,7 @@ import (
 )
 
 var (
-	AzureKeychain authn.Keychain = azureKeyChain{}
+	AzureKeychain authn.Keychain = NewAzureKeychain()
 
 	KyvernoUserAgent = fmt.Sprintf("Kyverno/%s (%s; %s)", version.GetVersionInfo().GitVersion, runtime.GOOS, runtime.GOARCH)
 	DefaultTransport = &http.Transport{
@@ -59,12 +57,18 @@ type autoRefreshSecrets struct {
 }
 
 func RemoteOptsFromIvpolCredentials(lister corev1listers.SecretLister, ivpolCreds v1alpha1.Credentials, defaultNamespace string, logger logr.Logger) ([]remote.Option, []name.Option) {
+	return RemoteOptsFromIvpolCredentialsWithOptions(lister, ivpolCreds, defaultNamespace, logger)
+}
+
+// RemoteOptsFromIvpolCredentialsWithOptions builds policy credential options with
+// per-provider configuration. Existing defaults are retained for omitted options.
+func RemoteOptsFromIvpolCredentialsWithOptions(lister corev1listers.SecretLister, ivpolCreds v1alpha1.Credentials, defaultNamespace string, logger logr.Logger, opts ...ProviderOption) ([]remote.Option, []name.Option) {
 	providers := make([]string, 0, len(ivpolCreds.Providers))
 	for _, p := range ivpolCreds.Providers {
 		providers = append(providers, string(p))
 	}
 
-	authOpts := remoteOptsFromParams(lister, defaultNamespace, ivpolCreds.Secrets, providers, logger)
+	authOpts := remoteOptsFromParams(lister, defaultNamespace, ivpolCreds.Secrets, providers, logger, opts...)
 
 	nameOpts := []name.Option{}
 	if ivpolCreds.AllowInsecureRegistry {
@@ -86,6 +90,13 @@ func DefaultOpts() [3]remote.Option {
 }
 
 func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
+	return KeychainsForProvidersWithOptions(credentialProviders)
+}
+
+// KeychainsForProvidersWithOptions creates provider keychains using per-instance
+// configuration. Options for Azure do not change other credential providers.
+func KeychainsForProvidersWithOptions(credentialProviders []string, opts ...ProviderOption) []authn.Keychain {
+	o := newProviderOptions(opts...)
 	var chains []authn.Keychain
 	helpers := sets.New(credentialProviders...)
 	if helpers.Has("default") {
@@ -98,7 +109,11 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 		chains = append(chains, authn.NewKeychainFromHelper(ecr.NewECRHelper(ecr.WithLogger(io.Discard))))
 	}
 	if helpers.Has("azure") {
-		chains = append(chains, AzureKeychain)
+		if o.azureRegistryHTTPClient == nil {
+			chains = append(chains, AzureKeychain)
+		} else {
+			chains = append(chains, azureKeyChain{registryHTTPClient: o.azureRegistryHTTPClient})
+		}
 	}
 	if helpers.Has("github") {
 		chains = append(chains, github.Keychain)
@@ -123,7 +138,7 @@ func (kc *autoRefreshSecrets) Resolve(resource authn.Resource) (authn.Authentica
 	return inner.Resolve(resource)
 }
 
-func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace string, secrets, credentialProviders []string, logger logr.Logger) [3]remote.Option {
+func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace string, secrets, credentialProviders []string, logger logr.Logger, opts ...ProviderOption) [3]remote.Option {
 	ret := DefaultOpts()
 
 	kcs := []authn.Keychain{}
@@ -133,7 +148,7 @@ func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace st
 	}
 
 	if len(credentialProviders) > 0 {
-		regKcs := KeychainsForProviders(credentialProviders...)
+		regKcs := KeychainsForProvidersWithOptions(credentialProviders, opts...)
 		kcs = append(kcs, regKcs...)
 	}
 
@@ -176,34 +191,4 @@ func parseSecretReference(secretRef string, defaultNamespace string) (namespace 
 	}
 	// otherwise return the default namespace and the secret ref with the leading slash removed
 	return defaultNamespace, secretRef
-}
-
-type azureKeyChain struct{}
-
-func (azureKeyChain) Resolve(resource authn.Resource) (authn.Authenticator, error) {
-	if !isACRRegistry(resource.RegistryStr()) {
-		return authn.Anonymous, nil
-	}
-
-	ref, err := name.ParseReference(resource.String())
-	if err != nil {
-		return authn.Anonymous, err
-	}
-
-	azClient := azure.NewClient()
-	auth, err := azClient.Login(context.TODO(), true, resource.String(), ref)
-	if err != nil {
-		return authn.Anonymous, err
-	}
-	return auth, nil
-}
-
-func isACRRegistry(input string) bool {
-	serverURL, err := url.Parse("https://" + input)
-	if err != nil {
-		return false
-	}
-
-	host := strings.ToLower(strings.TrimSuffix(serverURL.Hostname(), "."))
-	return azure.ValidHost(host)
 }
