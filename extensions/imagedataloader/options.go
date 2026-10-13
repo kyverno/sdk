@@ -37,11 +37,22 @@ var (
 type Option func(*options)
 
 type options struct {
-	insecure            bool
-	secrets             []string
-	credentialProviders []string
-	localCredentials    bool
-	transport           func(http.RoundTripper) http.RoundTripper
+	azureRegistryHTTPClient *http.Client
+	insecure                bool
+	secrets                 []string
+	credentialProviders     []string
+	localCredentials        bool
+	transport               func(http.RoundTripper) http.RoundTripper
+}
+
+// WithAzureRegistryHTTPClient sets the HTTP client used only for Azure registry
+// token exchanges. The caller owns the client and its redirect, proxy, timeout,
+// and transport settings. A nil client keeps the default exchange behavior.
+// Identity acquisition, including managed identity, keeps its default transport.
+func WithAzureRegistryHTTPClient(client *http.Client) Option {
+	return func(o *options) {
+		o.azureRegistryHTTPClient = client
+	}
 }
 
 func WithInsecure(v bool) Option {
@@ -128,7 +139,7 @@ func makeAuthOptions(lister corev1.SecretInterface, opts ...Option) ([]remote.Op
 	}
 
 	if len(opt.credentialProviders) > 0 {
-		keychains = append(keychains, KeychainsForProviders(opt.credentialProviders...)...)
+		keychains = append(keychains, KeychainsForProvidersWithOptions(opt.credentialProviders, opts...)...)
 	}
 
 	if opt.localCredentials {
