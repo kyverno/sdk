@@ -54,18 +54,24 @@ type Fetcher interface {
 }
 
 type imagedatafetcher struct {
-	lister         k8scorev1.SecretInterface
-	defaultOptions []remote.Option
+	azureRegistryHTTPClient *http.Client
+	lister                  k8scorev1.SecretInterface
+	defaultOptions          []remote.Option
 }
 
 func New(lister k8scorev1.SecretInterface, opts ...Option) (*imagedatafetcher, error) {
+	var opt options
+	for _, o := range opts {
+		o(&opt)
+	}
 	remoteOpts, err := makeDefaultOpts(lister, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return &imagedatafetcher{
-		lister:         lister,
-		defaultOptions: remoteOpts,
+		azureRegistryHTTPClient: opt.azureRegistryHTTPClient,
+		lister:                  lister,
+		defaultOptions:          remoteOpts,
 	}, nil
 }
 
@@ -147,7 +153,10 @@ func (i *imagedatafetcher) remoteOptions(ctx context.Context, lister k8scorev1.S
 	var opts []remote.Option
 	opts = append(opts, i.defaultOptions...)
 
-	authOpts, err := makeAuthOptions(lister, options...)
+	// Keep the configured exchange client when authentication providers are
+	// selected per fetch. Per-fetch client options take precedence.
+	authOptions := append([]Option{WithAzureRegistryHTTPClient(i.azureRegistryHTTPClient)}, options...)
+	authOpts, err := makeAuthOptions(lister, authOptions...)
 	if err != nil {
 		return nil, err
 	}
