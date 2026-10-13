@@ -1,6 +1,7 @@
 package regcreds
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -65,8 +66,10 @@ func TestAzureProviderHostSelection(t *testing.T) {
 	providers := KeychainsForProviders("azure")
 	require.Len(t, providers, 1)
 	for source, keychain := range map[string]authn.Keychain{
-		"exported keychain": AzureKeychain,
-		"provider list":     providers[0],
+		"exported keychain":        AzureKeychain,
+		"provider list":            providers[0],
+		"configured keychain":      NewAzureKeychain(WithAzureRegistryHTTPClient(&http.Client{})),
+		"configured provider list": KeychainsForProvidersWithOptions([]string{"azure"}, WithAzureRegistryHTTPClient(&http.Client{}))[0],
 	} {
 		t.Run(source, func(t *testing.T) {
 			t.Parallel()

@@ -3,6 +3,7 @@ package registryclient
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -77,13 +78,14 @@ func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultN
 
 // options accumulates the configuration collected from the Option values passed to New.
 type options struct {
-	secretLister      corev1listers.SecretLister
-	defaultNamespace  string
-	imagePullSecrets  []string
-	credentialHelpers []string
-	allowInsecure     bool
-	keychain          authn.Keychain
-	logger            logr.Logger
+	secretLister            corev1listers.SecretLister
+	defaultNamespace        string
+	imagePullSecrets        []string
+	credentialHelpers       []string
+	allowInsecure           bool
+	keychain                authn.Keychain
+	logger                  logr.Logger
+	azureRegistryHTTPClient *http.Client
 }
 
 // Option configures a Client built by New.
@@ -120,6 +122,16 @@ func WithImagePullSecrets(secrets ...string) Option {
 func WithCredentialHelpers(providers ...string) Option {
 	return func(o *options) {
 		o.credentialHelpers = append(o.credentialHelpers, providers...)
+	}
+}
+
+// WithAzureRegistryHTTPClient sets the HTTP client used by the Azure provider
+// to exchange identity tokens for registry credentials. It does not change the
+// transport used to acquire Azure identity tokens, including managed identity.
+// A nil client retains the default Azure registry transport.
+func WithAzureRegistryHTTPClient(client *http.Client) Option {
+	return func(o *options) {
+		o.azureRegistryHTTPClient = client
 	}
 }
 
@@ -166,7 +178,7 @@ func New(opts ...Option) Client {
 		kcs = append(kcs, regcreds.NewSecretsKeychain(o.secretLister, o.defaultNamespace, o.logger, o.imagePullSecrets...))
 	}
 	if len(o.credentialHelpers) > 0 {
-		kcs = append(kcs, regcreds.KeychainsForProviders(o.credentialHelpers...)...)
+		kcs = append(kcs, regcreds.KeychainsForProvidersWithOptions(o.credentialHelpers, regcreds.WithAzureRegistryHTTPClient(o.azureRegistryHTTPClient))...)
 	}
 
 	var authnKc authn.Keychain
