@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 )
 
 type secretLookupLister struct {
@@ -140,32 +142,35 @@ func TestSecretsKeychainLookupErrors(t *testing.T) {
 	}
 }
 
-func TestSecretsKeychainCachedLookupAndRefresh(t *testing.T) {
+func TestSecretsKeychainInformerLookupAndRefresh(t *testing.T) {
 	t.Parallel()
-	for _, reference := range []string{"creds", "tenant/creds", "/tenant/creds"} {
-		t.Run(reference, func(t *testing.T) {
+	for _, test := range []struct {
+		reference        string
+		defaultNamespace string
+	}{
+		{"creds", "tenant"},
+		{"tenant/creds", "other"},
+		{"/tenant/creds", "other"},
+	} {
+		t.Run(test.reference, func(t *testing.T) {
 			t.Parallel()
-			password := "first"
-			var namespace, secretName string
-			lister := secretLookupLister{namespace: func(value string) corev1listers.SecretNamespaceLister {
-				namespace = value
-				return cachedSecretLookup{get: func(value string) (*corev1.Secret, error) {
-					secretName = value
-					return pullSecret(password), nil
-				}}
-			}}
-			keychain := NewSecretsKeychain(lister, "tenant", logr.Discard(), reference)
+			indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+			keychain := NewSecretsKeychain(corev1listers.NewSecretLister(indexer), test.defaultNamespace, logr.Discard(), test.reference)
 			resource := name.MustParseReference("registry.example/image:tag").Context()
-			for _, expected := range []string{"first", "rotated"} {
-				password = expected
+			for i, expected := range []string{"first", "rotated"} {
+				secret := pullSecret(expected)
+				secret.Namespace, secret.Name = "tenant", "creds"
+				if i == 0 {
+					require.NoError(t, indexer.Add(secret))
+				} else {
+					require.NoError(t, indexer.Update(secret))
+				}
 				authenticator, err := keychain.Resolve(resource)
 				require.NoError(t, err)
 				auth, err := authenticator.Authorization()
 				require.NoError(t, err)
 				require.Equal(t, "user", auth.Username)
 				require.Equal(t, expected, auth.Password)
-				require.Equal(t, "tenant", namespace)
-				require.Equal(t, "creds", secretName)
 			}
 		})
 	}
@@ -191,27 +196,82 @@ func TestSecretsKeychainNilBackend(t *testing.T) {
 
 func TestSecretsKeychainCanceledBeforeLookup(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	// A canceled request must be rejected before even consulting the backend.
-	keychain := NewSecretsKeychain(nil, "tenant", logr.Discard(), "creds")
-	_, err := authn.Resolve(ctx, keychain, name.MustParseReference("registry.example/image:tag").Context())
-	require.ErrorIs(t, err, context.Canceled)
+	for _, test := range []struct {
+		name       string
+		references []string
+	}{
+		{"explicit secret", []string{"creds"}},
+		{"no secrets", nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			var namespaceCalls, lookupCalls int
+			lister := secretLookupLister{namespace: func(string) corev1listers.SecretNamespaceLister {
+				namespaceCalls++
+				return cachedSecretLookup{get: func(string) (*corev1.Secret, error) {
+					lookupCalls++
+					return pullSecret("unused"), nil
+				}}
+			}}
+			fallback := &fallbackCredentials{}
+			keychain := authn.NewMultiKeychain(NewSecretsKeychain(lister, "tenant", logr.Discard(), test.references...), fallback)
+			_, err := authn.Resolve(ctx, keychain, name.MustParseReference("registry.example/image:tag").Context())
+			require.ErrorIs(t, err, context.Canceled)
+			require.Zero(t, namespaceCalls)
+			require.Zero(t, lookupCalls)
+			require.Zero(t, fallback.calls)
+		})
+	}
 }
 
 func TestSecretsKeychainCanceledDuringCachedLookup(t *testing.T) {
 	t.Parallel()
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{"success", nil},
+		{"not found", k8serrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "creds")},
+		{"backend error", k8serrors.NewServiceUnavailable("unavailable")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			lister := secretLookupLister{namespace: func(string) corev1listers.SecretNamespaceLister {
+				return cachedSecretLookup{get: func(string) (*corev1.Secret, error) {
+					cancel()
+					return pullSecret("unused"), test.err
+				}}
+			}}
+			fallback := &fallbackCredentials{}
+			keychain := authn.NewMultiKeychain(NewSecretsKeychain(lister, "tenant", logr.Discard(), "creds"), fallback)
+			_, err := authn.Resolve(ctx, keychain, name.MustParseReference("registry.example/image:tag").Context())
+			require.ErrorIs(t, err, context.Canceled)
+			require.Zero(t, fallback.calls)
+		})
+	}
+}
+
+func TestSecretsKeychainCanceledBetweenLookups(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	var names []string
 	lister := secretLookupLister{namespace: func(string) corev1listers.SecretNamespaceLister {
-		return cachedSecretLookup{get: func(string) (*corev1.Secret, error) {
-			cancel()
-			return pullSecret("unused"), nil
+		return cachedSecretLookup{get: func(name string) (*corev1.Secret, error) {
+			names = append(names, name)
+			return nil, k8serrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, name)
 		}}
 	}}
+	// Cancel after the first read returns, while processing its missing Secret.
+	logger := funcr.New(func(string, string) { cancel() }, funcr.Options{Verbosity: 4})
 	fallback := &fallbackCredentials{}
-	keychain := authn.NewMultiKeychain(NewSecretsKeychain(lister, "tenant", logr.Discard(), "creds"), fallback)
+	keychain := authn.NewMultiKeychain(NewSecretsKeychain(lister, "tenant", logger, "first", "second"), fallback)
 	_, err := authn.Resolve(ctx, keychain, name.MustParseReference("registry.example/image:tag").Context())
 	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, []string{"first"}, names)
 	require.Zero(t, fallback.calls)
 }

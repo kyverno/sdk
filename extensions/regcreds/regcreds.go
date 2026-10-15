@@ -116,11 +116,11 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 	return chains
 }
 
-// NewSecretsKeychain refreshes pull secrets on each credential resolution. When
-// a namespace lister implements ContextSecretNamespaceLister, authn.Resolve
-// forwards the request context to its Secret reads. Only missing Secrets allow
-// fallback to another credential source; other lookup failures are returned to
-// the caller.
+// NewSecretsKeychain retains the lister and Secret references, reading their
+// current contents on each credential resolution. Informer-backed listers read
+// from the cache. When a namespace lister implements ContextSecretNamespaceLister,
+// authn.Resolve forwards the request context to its Secret reads. Missing
+// Secrets are skipped; other lookup failures are returned to the caller.
 func NewSecretsKeychain(lister corev1listers.SecretLister, defaultNamespace string, logger logr.Logger, imagePullSecrets ...string) authn.Keychain {
 	return &autoRefreshSecrets{
 		lister:           lister,
@@ -136,6 +136,11 @@ func (kc *autoRefreshSecrets) Resolve(resource authn.Resource) (authn.Authentica
 
 func (kc *autoRefreshSecrets) ResolveContext(ctx context.Context, resource authn.Resource) (authn.Authenticator, error) {
 	inner, err := generateKeychainForPullSecrets(ctx, kc.lister, kc.defaultNamespace, kc.logger, kc.imagePullSecrets...)
+	// A cache Get cannot observe ctx. Reject cancellation before using its
+	// credentials or allowing a missing Secret to fall through to another keychain.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -167,12 +172,9 @@ func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace st
 // generateKeychainForPullSecrets generates keychain by fetching secrets data from imagePullSecrets.
 // Supports namespace/name notation for secrets in any namespace.
 func generateKeychainForPullSecrets(ctx context.Context, lister corev1listers.SecretLister, defaultNamespace string, logger logr.Logger, imagePullSecrets ...string) (authn.Keychain, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	var secrets []corev1.Secret
-	// for each secret
 	for _, imagePullSecret := range imagePullSecrets {
+		// Stop before starting another read, including context-unaware cache reads.
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -187,9 +189,6 @@ func generateKeychainForPullSecrets(ctx context.Context, lister corev1listers.Se
 			secret, err = contextual.GetWithContext(ctx, name)
 		} else {
 			secret, err = namespaceLister.Get(name)
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
 		}
 		if err == nil {
 			secrets = append(secrets, *secret)
