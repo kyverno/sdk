@@ -58,6 +58,16 @@ type autoRefreshSecrets struct {
 	imagePullSecrets []string
 }
 
+// ContextSecretNamespaceLister is optionally implemented by the namespace lister
+// returned by a SecretLister. It allows live Secret reads to use the registry
+// request's cancellation, deadline, and values. Informer-backed listers can keep
+// implementing only SecretNamespaceLister; their Get method is used as before.
+type ContextSecretNamespaceLister interface {
+	GetWithContext(context.Context, string) (*corev1.Secret, error)
+}
+
+var _ authn.ContextKeychain = (*autoRefreshSecrets)(nil)
+
 func RemoteOptsFromIvpolCredentials(lister corev1listers.SecretLister, ivpolCreds v1alpha1.Credentials, defaultNamespace string, logger logr.Logger) ([]remote.Option, []name.Option) {
 	providers := make([]string, 0, len(ivpolCreds.Providers))
 	for _, p := range ivpolCreds.Providers {
@@ -106,6 +116,11 @@ func KeychainsForProviders(credentialProviders ...string) []authn.Keychain {
 	return chains
 }
 
+// NewSecretsKeychain refreshes pull secrets on each credential resolution. When
+// a namespace lister implements ContextSecretNamespaceLister, authn.Resolve
+// forwards the request context to its Secret reads. Only missing Secrets allow
+// fallback to another credential source; other lookup failures are returned to
+// the caller.
 func NewSecretsKeychain(lister corev1listers.SecretLister, defaultNamespace string, logger logr.Logger, imagePullSecrets ...string) authn.Keychain {
 	return &autoRefreshSecrets{
 		lister:           lister,
@@ -116,11 +131,15 @@ func NewSecretsKeychain(lister corev1listers.SecretLister, defaultNamespace stri
 }
 
 func (kc *autoRefreshSecrets) Resolve(resource authn.Resource) (authn.Authenticator, error) {
-	inner, err := generateKeychainForPullSecrets(kc.lister, kc.defaultNamespace, kc.logger, kc.imagePullSecrets...)
+	return kc.ResolveContext(context.Background(), resource)
+}
+
+func (kc *autoRefreshSecrets) ResolveContext(ctx context.Context, resource authn.Resource) (authn.Authenticator, error) {
+	inner, err := generateKeychainForPullSecrets(ctx, kc.lister, kc.defaultNamespace, kc.logger, kc.imagePullSecrets...)
 	if err != nil {
 		return nil, err
 	}
-	return inner.Resolve(resource)
+	return authn.Resolve(ctx, inner, resource)
 }
 
 func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace string, secrets, credentialProviders []string, logger logr.Logger) [3]remote.Option {
@@ -147,12 +166,31 @@ func remoteOptsFromParams(lister corev1listers.SecretLister, defaultNamespace st
 
 // generateKeychainForPullSecrets generates keychain by fetching secrets data from imagePullSecrets.
 // Supports namespace/name notation for secrets in any namespace.
-func generateKeychainForPullSecrets(lister corev1listers.SecretLister, defaultNamespace string, logger logr.Logger, imagePullSecrets ...string) (authn.Keychain, error) {
+func generateKeychainForPullSecrets(ctx context.Context, lister corev1listers.SecretLister, defaultNamespace string, logger logr.Logger, imagePullSecrets ...string) (authn.Keychain, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var secrets []corev1.Secret
 	// for each secret
 	for _, imagePullSecret := range imagePullSecrets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if lister == nil {
+			return nil, fmt.Errorf("cannot resolve registry credentials: secret lister is not configured")
+		}
 		namespace, name := parseSecretReference(imagePullSecret, defaultNamespace)
-		secret, err := lister.Secrets(namespace).Get(name)
+		namespaceLister := lister.Secrets(namespace)
+		var secret *corev1.Secret
+		var err error
+		if contextual, ok := namespaceLister.(ContextSecretNamespaceLister); ok {
+			secret, err = contextual.GetWithContext(ctx, name)
+		} else {
+			secret, err = namespaceLister.Get(name)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err == nil {
 			secrets = append(secrets, *secret)
 		} else if !k8serrors.IsNotFound(err) {
@@ -162,8 +200,7 @@ func generateKeychainForPullSecrets(lister corev1listers.SecretLister, defaultNa
 		}
 	}
 
-	// context.TODO is not a problem here. the kauth.NewFromPullSecrets doesn't use the context parameter
-	return kauth.NewFromPullSecrets(context.TODO(), secrets)
+	return kauth.NewFromPullSecrets(ctx, secrets)
 }
 
 func parseSecretReference(secretRef string, defaultNamespace string) (namespace string, name string) {

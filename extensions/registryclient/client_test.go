@@ -212,7 +212,7 @@ func TestWithTransport_Wiring(t *testing.T) {
 	c := New(WithTransport(sentinel))
 
 	_, err := c.FetchImageDescriptor(context.Background(), "example.com/repo:latest")
-	
+
 	// The request should fail, but it should fail specifically because our sentinel
 	// RoundTripper aborted it, proving the transport was wired correctly.
 	require.Error(t, err)

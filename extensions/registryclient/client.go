@@ -86,6 +86,7 @@ type options struct {
 	keychain          authn.Keychain
 	logger            logr.Logger
 	transport         http.RoundTripper
+	keychainWrappers  []func(authn.Keychain) authn.Keychain
 }
 
 // Option configures a Client built by New.
@@ -159,10 +160,38 @@ func WithKeychain(kc authn.Keychain) Option {
 	}
 }
 
+// WithKeychainWrapper wraps the complete credential chain, including configured
+// Secrets, providers and WithKeychain sources. Wrappers are applied in option
+// order after credential composition, so the last wrapper is outermost. A nil
+// wrapper is ignored; a non-nil wrapper must return a non-nil keychain.
+//
+// A wrapper that needs the request context should implement authn.ContextKeychain
+// and delegate to authn.Resolve with that context.
+func WithKeychainWrapper(wrap func(authn.Keychain) authn.Keychain) Option {
+	return func(o *options) {
+		if wrap != nil {
+			o.keychainWrappers = append(o.keychainWrappers, wrap)
+		}
+	}
+}
+
 // New builds a Client. With no options, it authenticates using authn.DefaultKeychain
 // (local Docker/Podman config, or anonymous). Use WithImagePullSecrets/WithCredentialHelpers
 // for Kubernetes-based credentials, and WithKeychain to layer an existing keychain on top.
 func New(opts ...Option) Client {
+	return newClient(opts...)
+}
+
+// NewRemoteOptions builds reusable registry options with the same credentials,
+// transport, tracing and reference parsing as New. It does not bind a request
+// context or create reusable pullers/pushers. Consumers such as image data loaders
+// can retain these options and append remote.WithContext for each request, keeping
+// cancellation and credential resolution scoped to that request.
+func NewRemoteOptions(opts ...Option) ([]gcrremote.Option, []name.Option) {
+	return newClient(opts...).remoteOptions()
+}
+
+func newClient(opts ...Option) *client {
 	o := options{logger: logr.Discard()}
 	for _, opt := range opts {
 		if opt != nil {
@@ -189,6 +218,9 @@ func New(opts ...Option) Client {
 	if o.keychain != nil {
 		authnKc = authn.NewMultiKeychain(o.keychain, authnKc)
 	}
+	for _, wrap := range o.keychainWrappers {
+		authnKc = wrap(authnKc)
+	}
 
 	transport := o.transport
 	if transport == nil {
@@ -205,10 +237,14 @@ func New(opts ...Option) Client {
 // In some scenarios, we don't want to rely on the puller and pusher that have been created by the registry
 // client and want to instantiate our own from the credentials we have.
 func (c *client) optionsWithoutPuller(ctx context.Context) ([]gcrremote.Option, []name.Option) {
+	opts, nameOpts := c.remoteOptions()
+	return append(opts, gcrremote.WithContext(ctx)), nameOpts
+}
+
+func (c *client) remoteOptions() ([]gcrremote.Option, []name.Option) {
 	opts := []gcrremote.Option{
 		gcrremote.WithAuthFromKeychain(c.keychain),
 		gcrremote.WithTransport(c.transport),
-		gcrremote.WithContext(ctx),
 		gcrremote.WithUserAgent(regcreds.KyvernoUserAgent),
 	}
 
