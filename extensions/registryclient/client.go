@@ -119,7 +119,7 @@ func WithImagePullSecrets(secrets ...string) Option {
 }
 
 // WithCredentialHelpers configures the client to also authenticate using the given registry
-// credential providers/helpers (one or more of: default, google, amazon, azure, github).
+// credential providers/helpers (one or more of: default, google, amazon, azure, github, alibabacloud).
 func WithCredentialHelpers(providers ...string) Option {
 	return func(o *options) {
 		o.credentialHelpers = append(o.credentialHelpers, providers...)

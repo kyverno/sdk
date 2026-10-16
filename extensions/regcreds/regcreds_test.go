@@ -75,3 +75,43 @@ func TestNewSecretsKeychain_NoSecretsLogsNothing(t *testing.T) {
 }
 
 var _ authn.Keychain = (*autoRefreshSecrets)(nil)
+
+func TestKeychainsForProviders(t *testing.T) {
+	tests := []struct {
+		name      string
+		providers []string
+		want      int
+	}{
+		{name: "no providers", providers: nil, want: 0},
+		{name: "default", providers: []string{"default"}, want: 1},
+		{name: "google", providers: []string{"google"}, want: 1},
+		{name: "amazon", providers: []string{"amazon"}, want: 1},
+		{name: "azure", providers: []string{"azure"}, want: 1},
+		{name: "github", providers: []string{"github"}, want: 1},
+		{name: "alibabacloud", providers: []string{"alibabacloud"}, want: 1},
+		{name: "all providers", providers: []string{"default", "google", "amazon", "azure", "github", "alibabacloud"}, want: 6},
+		{name: "unknown provider", providers: []string{"unknown"}, want: 0},
+		{name: "duplicate providers are counted once", providers: []string{"alibabacloud", "alibabacloud"}, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Len(t, KeychainsForProviders(tt.providers...), tt.want)
+		})
+	}
+}
+
+// The alibabacloud helper only authenticates against ACR registries; for any other
+// registry it must fall back to anonymous instead of failing the keychain, otherwise
+// enabling the helper would break verification of images hosted elsewhere.
+func TestKeychainsForProviders_AlibabacloudFallsBackToAnonymousForNonACRRegistry(t *testing.T) {
+	// Force the non-EE code path of the ACR helper so it rejects the domain
+	// without reaching out to the instance metadata service.
+	t.Setenv("DOCKER_CREDENTIAL_ACR_HELPER_INSTANCE_ID", "")
+
+	chains := KeychainsForProviders("alibabacloud")
+	require.Len(t, chains, 1)
+
+	auth, err := chains[0].Resolve(testResource("ghcr.io"))
+	require.NoError(t, err)
+	assert.Equal(t, authn.Anonymous, auth)
+}
