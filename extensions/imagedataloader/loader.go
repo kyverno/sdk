@@ -111,7 +111,7 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 			return nil, err
 		}
 
-		// Check the config size before loading the payload.
+		// an attacker-authored config descriptor otherwise sizes this read
 		if img.Manifest.Config.Size > defaultPayloadLimit {
 			return nil, fmt.Errorf(
 				"config size %d exceeds %d",

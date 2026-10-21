@@ -118,7 +118,7 @@ func TestFetchImageData_IndexPlatformSelection(t *testing.T) {
 		},
 		wantIndex: true,
 	}, {
-		name: "windows index with empty OS version in the second child ",
+		name: "windows index with empty OS version in the second child",
 		children: []mutate.IndexAddendum{
 			platformChildWithVersion(t, "windows", "amd64", "10.0.17763.9245"),
 			platformChildWithVersion(t, "windows", "amd64", ""),
