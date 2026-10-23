@@ -125,12 +125,19 @@ func TestFetchImageData_IndexPlatformSelection(t *testing.T) {
 		},
 		wantIndex: true,
 	}, {
-		name: "multi platform index is left to platform selection",
+		name: "multi platform index without default platform is preserved",
 		children: []mutate.IndexAddendum{
 			platformChild(t, "linux", "arm64"),
 			platformChild(t, "linux", "s390x"),
 		},
-		wantErr: "no child with platform linux/amd64",
+		wantIndex: true,
+	}, {
+		name: "windows index with multiple architectures is preserved",
+		children: []mutate.IndexAddendum{
+			platformChild(t, "windows", "amd64"),
+			platformChild(t, "windows", "arm64"),
+		},
+		wantIndex: true,
 	}, {
 		name:    "index holding no images is left to platform selection",
 		wantErr: "no child with platform linux/amd64",

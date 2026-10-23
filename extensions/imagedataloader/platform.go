@@ -29,10 +29,11 @@ func imageForDescriptor(desc *remote.Descriptor) (gcrv1.Image, bool, error) {
 		return nil, false, err
 	}
 
-	// A single image can be resolved directly. For multiple images, preserve the index when
-	// platform metadata is ambiguous; otherwise let the registry platform selection choose a child.
+	// A single image can be resolved directly. For multiple images, preserve the
+	// index when no child matches the default platform; otherwise let registry
+	// platform selection choose a child.
 	if len(images) != 1 {
-		if hasAmbiguousPlatform(images) {
+		if len(images) > 1 && !hasDefaultPlatform(images) {
 			return nil, false, nil
 		}
 		image, err := desc.Image()
@@ -54,28 +55,19 @@ func describesImage(desc gcrv1.Descriptor) bool {
 	return desc.Platform.OS != unknownPlatform && desc.Platform.Architecture != unknownPlatform
 }
 
-// hasAmbiguousPlatform reports whether multiple Windows image descriptors target the same
-// OS and architecture but specify different OS versions.
-func hasAmbiguousPlatform(images []gcrv1.Descriptor) bool {
-	if len(images) < 2 {
-		return false
-	}
-
-	first := images[0].Platform
-	if first == nil || first.OS != "windows" {
-		return false
-	}
-
-	versions := make(map[string]struct{})
+// hasDefaultPlatform reports whether any image descriptor declares
+// the default linux/amd64 platform.
+func hasDefaultPlatform(images []gcrv1.Descriptor) bool {
 	for _, image := range images {
 		platform := image.Platform
-		if platform == nil ||
-			platform.OS != first.OS ||
-			platform.Architecture != first.Architecture {
-			return false
+		if platform == nil {
+			continue
 		}
-		versions[platform.OSVersion] = struct{}{}
+
+		if platform.OS == "linux" && platform.Architecture == "amd64" {
+			return true
+		}
 	}
 
-	return len(versions) > 1
+	return false
 }
