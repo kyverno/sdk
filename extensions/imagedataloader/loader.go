@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	gcrv1 "github.com/google/go-containerregistry/pkg/v1"
@@ -184,7 +185,7 @@ type ImageData struct {
 	desc                   *remote.Descriptor
 	referrersManifest      *gcrv1.IndexManifest
 	referrersData          map[string]referrerData
-	verifiedReferrers      map[string]gcrv1.Descriptor
+	verifiedReferrers      map[string][]gcrv1.Descriptor
 	verifiedIntotoPayloads map[string][]byte
 }
 
@@ -313,12 +314,24 @@ func (i *ImageData) FetchReferrerData(desc gcrv1.Descriptor) ([]byte, *gcrv1.Des
 	return b, layerDesc, nil
 }
 
+// AddVerifiedReferrer records desc as verified for its artifact type. Several
+// referrers of the same type can be recorded; a digest already recorded is ignored.
 func (i *ImageData) AddVerifiedReferrer(desc gcrv1.Descriptor) {
 	if i.verifiedReferrers == nil {
-		i.verifiedReferrers = make(map[string]gcrv1.Descriptor, 0)
+		i.verifiedReferrers = make(map[string][]gcrv1.Descriptor, 0)
 	}
 
-	i.verifiedReferrers[desc.ArtifactType] = desc
+	for _, d := range i.verifiedReferrers[desc.ArtifactType] {
+		if d.Digest == desc.Digest {
+			return
+		}
+	}
+	i.verifiedReferrers[desc.ArtifactType] = append(i.verifiedReferrers[desc.ArtifactType], desc)
+}
+
+// VerifiedReferrers returns a copy of the referrers recorded as verified for artifactType.
+func (i *ImageData) VerifiedReferrers(artifactType string) []gcrv1.Descriptor {
+	return slices.Clone(i.verifiedReferrers[artifactType])
 }
 
 func (i *ImageData) AddVerifiedIntotoPayloads(predicateType string, data []byte) {
@@ -339,30 +352,14 @@ func (i *ImageData) GetPayload(a v1beta1.Attestation) (any, error) {
 			return nil, fmt.Errorf("intoto attestation payload cannot be fetch before verifying intoto attestation")
 		}
 	} else if a.IsReferrer() {
-		var err error
-		if i.verifiedReferrers != nil {
-			desc, ok := i.verifiedReferrers[a.Referrer.Type]
-			if ok {
-				b, _, err = i.FetchReferrerData(desc)
-				if err != nil {
-					return nil, err
-				}
-			}
+		descs := i.verifiedReferrers[a.Referrer.Type]
+		if len(descs) == 0 {
+			return nil, fmt.Errorf("referrer attestation payload of type %s cannot be fetched before verifying referrer attestation", a.Referrer.Type)
 		}
-
-		if len(b) == 0 {
-			descs, err := i.FetchReferrers(a.Referrer.Type)
-			if err != nil {
-				return nil, err
-			}
-			if len(descs) == 0 {
-				return nil, fmt.Errorf("artifact of type %s not found", a.Referrer.Type)
-			}
-
-			b, _, err = i.FetchReferrerData(descs[0])
-			if err != nil {
-				return nil, err
-			}
+		var err error
+		b, _, err = i.FetchReferrerData(descs[0])
+		if err != nil {
+			return nil, err
 		}
 	}
 
