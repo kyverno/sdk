@@ -11,6 +11,7 @@ require (
 	github.com/google/go-containerregistry/pkg/authn/kubernetes v0.0.0-20260224031529-85f2bf5f7303
 	github.com/klauspost/compress v1.18.5
 	github.com/kyverno/api v0.0.1-alpha.2.0.20260129144402-7b64bcf2b1f7
+	github.com/mozillazg/docker-credential-acr-helper v0.4.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/stretchr/testify v1.11.1
@@ -18,7 +19,7 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
 	go.opentelemetry.io/otel/trace v1.43.0
 	go.uber.org/multierr v1.11.0
-	golang.org/x/crypto v0.50.0
+	golang.org/x/crypto v0.51.0
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa
 	golang.org/x/sync v0.20.0
 	google.golang.org/protobuf v1.36.11
@@ -34,10 +35,23 @@ require (
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	github.com/AliyunContainerService/ack-ram-tool/pkg/credentials/provider v0.18.1 // indirect
+	github.com/AliyunContainerService/ack-ram-tool/pkg/ecsmetadata v0.0.9 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0 // indirect
+	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.4 // indirect
+	github.com/alibabacloud-go/cr-20160607 v1.0.1 // indirect
+	github.com/alibabacloud-go/cr-20181201 v1.0.10 // indirect
+	github.com/alibabacloud-go/darabonba-openapi v0.2.1 // indirect
+	github.com/alibabacloud-go/debug v1.0.1 // indirect
+	github.com/alibabacloud-go/endpoint-util v1.1.1 // indirect
+	github.com/alibabacloud-go/openapi-util v0.0.11 // indirect
+	github.com/alibabacloud-go/tea v1.3.12 // indirect
+	github.com/alibabacloud-go/tea-utils v1.4.5 // indirect
+	github.com/alibabacloud-go/tea-xml v1.1.2 // indirect
+	github.com/aliyun/credentials-go v1.4.7 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/aptible/supercronic v0.2.43 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.41.4 // indirect
@@ -59,6 +73,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.18.2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -97,9 +112,11 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
+	github.com/mozillazg/docker-credential-acr-helper/pkg/acr v0.2.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/onsi/ginkgo/v2 v2.28.0 // indirect
 	github.com/onsi/gomega v1.39.1 // indirect
+	github.com/phuslu/lru v1.0.18 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
@@ -110,6 +127,7 @@ require (
 	github.com/smartystreets/goconvey v1.8.1 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/tjfoc/gmsm v1.3.2 // indirect
 	github.com/vbatts/tar-split v0.12.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
@@ -118,17 +136,18 @@ require (
 	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/term v0.42.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/term v0.43.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
+	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	k8s.io/apiextensions-apiserver v0.35.4 // indirect
