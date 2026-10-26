@@ -3,14 +3,16 @@ package registryclient
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 
+	"github.com/go-logr/logr"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	gcrremote "github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/kyverno/kyverno/pkg/tracing"
 	"github.com/kyverno/sdk/extensions/regcreds"
+	"github.com/kyverno/sdk/internal/tracing"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 )
@@ -52,10 +54,11 @@ func MustRegistryClient() Client {
 }
 
 // SetupGlobalRegistryClient initializes the package-level global Client. imagePullSecrets and
-// regCredHelpers are comma-separated lists, as passed on the command line. Only the first call
+// regCredHelpers are comma-separated lists, as passed on the command line. Any extra options,
+// such as WithLogger, are applied after the ones built from the arguments. Only the first call
 // has any effect; later calls return the client built by the first one.
 func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultNamespace string,
-	imagePullSecrets string, regCredHelpers string, allowInsecure bool) Client {
+	imagePullSecrets string, regCredHelpers string, allowInsecure bool, extra ...Option) Client {
 	once.Do(func() {
 		opts := []Option{WithSecretLister(secretLister, defaultNamespace)}
 		if imagePullSecrets != "" {
@@ -67,6 +70,7 @@ func SetupGlobalRegistryClient(secretLister corev1listers.SecretLister, defaultN
 		if allowInsecure {
 			opts = append(opts, WithAllowInsecureRegistry(true))
 		}
+		opts = append(opts, extra...)
 		registryClient = New(opts...)
 	})
 	return registryClient
@@ -80,6 +84,9 @@ type options struct {
 	credentialHelpers []string
 	allowInsecure     bool
 	keychain          authn.Keychain
+	logger            logr.Logger
+	transport         http.RoundTripper
+	keychainWrappers  []func(authn.Keychain) authn.Keychain
 }
 
 // Option configures a Client built by New.
@@ -91,6 +98,14 @@ func WithSecretLister(lister corev1listers.SecretLister, defaultNamespace string
 	return func(o *options) {
 		o.secretLister = lister
 		o.defaultNamespace = defaultNamespace
+	}
+}
+
+// WithLogger configures the logger the client uses to report how it resolved
+// credentials. When it is not set, nothing is logged.
+func WithLogger(logger logr.Logger) Option {
+	return func(o *options) {
+		o.logger = logger
 	}
 }
 
@@ -118,6 +133,14 @@ func WithAllowInsecureRegistry(allow bool) Option {
 	}
 }
 
+// WithTransport configures the client to use the provided http.RoundTripper for registry requests.
+// If not set, regcreds.DefaultTransport is used.
+func WithTransport(t http.RoundTripper) Option {
+	return func(o *options) {
+		o.transport = t
+	}
+}
+
 // WithKeychain puts kc first in line to authenticate, falling back to the keychain built
 // from WithImagePullSecrets/WithCredentialHelpers. Useful for layering per-request
 // credentials on top of an existing keychain without losing it.
@@ -137,11 +160,39 @@ func WithKeychain(kc authn.Keychain) Option {
 	}
 }
 
+// WithKeychainWrapper wraps the complete credential chain, including configured
+// Secrets, providers and WithKeychain sources. Wrappers are applied in option
+// order after credential composition, so the last wrapper is outermost. A nil
+// wrapper is ignored; a non-nil wrapper must return a non-nil keychain.
+//
+// A wrapper that needs the request context should implement authn.ContextKeychain
+// and delegate to authn.Resolve with that context.
+func WithKeychainWrapper(wrap func(authn.Keychain) authn.Keychain) Option {
+	return func(o *options) {
+		if wrap != nil {
+			o.keychainWrappers = append(o.keychainWrappers, wrap)
+		}
+	}
+}
+
 // New builds a Client. With no options, it authenticates using authn.DefaultKeychain
 // (local Docker/Podman config, or anonymous). Use WithImagePullSecrets/WithCredentialHelpers
 // for Kubernetes-based credentials, and WithKeychain to layer an existing keychain on top.
 func New(opts ...Option) Client {
-	var o options
+	return newClient(opts...)
+}
+
+// NewRemoteOptions builds reusable registry options with the same credentials,
+// transport, tracing and reference parsing as New. It does not bind a request
+// context or create reusable pullers/pushers. Consumers such as image data loaders
+// can retain these options and append remote.WithContext for each request, keeping
+// cancellation and credential resolution scoped to that request.
+func NewRemoteOptions(opts ...Option) ([]gcrremote.Option, []name.Option) {
+	return newClient(opts...).remoteOptions()
+}
+
+func newClient(opts ...Option) *client {
+	o := options{logger: logr.Discard()}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&o)
@@ -151,7 +202,7 @@ func New(opts ...Option) Client {
 	// create an array of key chains
 	kcs := []authn.Keychain{}
 	if len(o.imagePullSecrets) > 0 && o.secretLister != nil {
-		kcs = append(kcs, regcreds.NewSecretsKeychain(o.secretLister, o.defaultNamespace, o.imagePullSecrets...))
+		kcs = append(kcs, regcreds.NewSecretsKeychain(o.secretLister, o.defaultNamespace, o.logger, o.imagePullSecrets...))
 	}
 	if len(o.credentialHelpers) > 0 {
 		kcs = append(kcs, regcreds.KeychainsForProviders(o.credentialHelpers...)...)
@@ -167,21 +218,33 @@ func New(opts ...Option) Client {
 	if o.keychain != nil {
 		authnKc = authn.NewMultiKeychain(o.keychain, authnKc)
 	}
+	for _, wrap := range o.keychainWrappers {
+		authnKc = wrap(authnKc)
+	}
+
+	transport := o.transport
+	if transport == nil {
+		transport = regcreds.DefaultTransport
+	}
 
 	return &client{
 		allowInsecureRegistry: o.allowInsecure,
 		keychain:              authnKc,
-		transport:             tracing.Transport(regcreds.DefaultTransport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)),
+		transport:             tracing.Transport(transport, otelhttp.WithFilter(tracing.RequestFilterIsInSpan)),
 	}
 }
 
 // In some scenarios, we don't want to rely on the puller and pusher that have been created by the registry
 // client and want to instantiate our own from the credentials we have.
 func (c *client) optionsWithoutPuller(ctx context.Context) ([]gcrremote.Option, []name.Option) {
+	opts, nameOpts := c.remoteOptions()
+	return append(opts, gcrremote.WithContext(ctx)), nameOpts
+}
+
+func (c *client) remoteOptions() ([]gcrremote.Option, []name.Option) {
 	opts := []gcrremote.Option{
 		gcrremote.WithAuthFromKeychain(c.keychain),
 		gcrremote.WithTransport(c.transport),
-		gcrremote.WithContext(ctx),
 		gcrremote.WithUserAgent(regcreds.KyvernoUserAgent),
 	}
 

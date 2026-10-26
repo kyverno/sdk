@@ -40,3 +40,18 @@ func Test_lib_LibraryName(t *testing.T) {
 	var l lib
 	assert.Equal(t, libraryName, l.LibraryName())
 }
+
+// ToGVR hands a *schema.GroupVersionResource to NativeToValue, which since
+// cel-go v0.31.0 only converts registered native types. This checks the
+// registration directly, so it also fails on older cel-go versions, which
+// convert unregistered structs anyway.
+func TestLib_RegistersGroupVersionResource(t *testing.T) {
+	for _, namespace := range []string{"", "default"} {
+		base, err := compiler.NewBaseEnv()
+		assert.NoError(t, err)
+		env, err := base.Extend(Lib(nil, namespace, version.MajorMinor(1, 18)))
+		assert.NoError(t, err)
+		_, found := env.CELTypeProvider().FindStructType("schema.GroupVersionResource")
+		assert.True(t, found, "namespace %q", namespace)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/ext"
 	"github.com/kyverno/sdk/extensions/cel/libs/versions"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/version"
 )
 
@@ -38,7 +39,10 @@ func (*lib) LibraryName() string {
 func (l *lib) CompileOptions() []cel.EnvOption {
 	return []cel.EnvOption{
 		cel.Variable("resource", ContextType),
-		ext.NativeTypes(reflect.TypeFor[Context]()),
+		// ToGVR returns a *schema.GroupVersionResource through NativeToValue. Since
+		// cel-go v0.31.0 only registered native types convert, so it is registered
+		// here alongside Context.
+		ext.NativeTypes(reflect.TypeFor[Context](), reflect.TypeFor[schema.GroupVersionResource]()),
 		l.extendEnv,
 	}
 }
