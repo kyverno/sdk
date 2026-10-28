@@ -9,7 +9,7 @@ require (
 	github.com/google/cel-go v0.29.2
 	github.com/google/go-containerregistry v0.21.5
 	github.com/google/go-containerregistry/pkg/authn/kubernetes v0.0.0-20260224031529-85f2bf5f7303
-	github.com/klauspost/compress v1.19.0
+	github.com/klauspost/compress v1.20.3
 	github.com/kyverno/api v0.0.1-alpha.2.0.20260129144402-7b64bcf2b1f7
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
