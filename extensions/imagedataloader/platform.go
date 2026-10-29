@@ -9,9 +9,10 @@ import (
 
 const unknownPlatform = "unknown"
 
-// imageForDescriptor resolves an index holding a single image by digest, Descriptor.Image
-// would select it by platform and fail on anything that is not linux/amd64.
-func imageForDescriptor(desc *remote.Descriptor) (gcrv1.Image, error) {
+// imageForDescriptor resolves a descriptor to an image when a child can be selected
+// unambiguously. It preserves indexes whose platform metadata does not identify a
+// single child.
+func imageForDescriptor(desc *remote.Descriptor) (gcrv1.Image, bool, error) {
 	index, err := desc.ImageIndex()
 	if err != nil {
 		// ImageIndex rejects a descriptor only on its media type, so this is the ordinary
@@ -19,21 +20,35 @@ func imageForDescriptor(desc *remote.Descriptor) (gcrv1.Image, error) {
 		// from. Image resolves such a descriptor directly, and returns the same error for
 		// the media types neither call supports, so continuing here hides nothing.
 		logs.Debug.Printf("%s is not an image index, resolving the descriptor directly: %v", desc.Digest, err)
-		return desc.Image()
+		image, err := desc.Image()
+		return image, true, err
 	}
 
 	images, err := partial.FindManifests(index, describesImage)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	// zero when no child of the index describes an image, more than one when the index is
-	// genuinely multi platform. neither has a single answer, so both keep platform selection
-	if len(images) != 1 {
-		return desc.Image()
-	}
+	// A single image can be resolved directly. For multiple images, preserve the
+	// index when no child matches the default platform; otherwise let registry
+	// platform selection choose a child.
+	switch len(images) {
+	case 0:
+		image, err := desc.Image()
+		return image, true, err
 
-	return index.Image(images[0].Digest)
+	case 1:
+		image, err := index.Image(images[0].Digest)
+		return image, true, err
+
+	default:
+		if !hasDefaultPlatform(images) {
+			return nil, false, nil
+		}
+
+		image, err := desc.Image()
+		return image, true, err
+	}
 }
 
 // referrers carry an artifact type, buildkit attestations an unknown platform
@@ -45,4 +60,21 @@ func describesImage(desc gcrv1.Descriptor) bool {
 		return true
 	}
 	return desc.Platform.OS != unknownPlatform && desc.Platform.Architecture != unknownPlatform
+}
+
+// hasDefaultPlatform reports whether any image descriptor declares
+// the default linux/amd64 platform.
+func hasDefaultPlatform(images []gcrv1.Descriptor) bool {
+	for _, image := range images {
+		platform := image.Platform
+		if platform == nil {
+			continue
+		}
+
+		if platform.OS == "linux" && platform.Architecture == "amd64" {
+			return true
+		}
+	}
+
+	return false
 }
