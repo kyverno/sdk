@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/awslabs/amazon-ecr-credential-helper/ecr-login v0.12.0
 	github.com/fluxcd/pkg/oci v0.46.0
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/google/cel-go v0.29.2
 	github.com/google/go-containerregistry v0.21.5
 	github.com/google/go-containerregistry/pkg/authn/kubernetes v0.0.0-20260224031529-85f2bf5f7303
