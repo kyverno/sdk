@@ -44,29 +44,44 @@ func (idc *imageContext) AddImages(ctx context.Context, images []string, authOpt
 	idc.Lock()
 	defer idc.Unlock()
 
+	// workers must not touch idc.list: holding the lock here only excludes other
+	// callers, so each worker writes into its own slot and the map is updated below
+	missing := make([]string, 0, len(images))
+	seen := make(map[string]struct{}, len(images))
+	for _, img := range images {
+		if _, found := idc.list[img]; found {
+			continue
+		}
+		if _, found := seen[img]; found {
+			continue
+		}
+		seen[img] = struct{}{}
+		missing = append(missing, img)
+	}
+
 	var g errgroup.Group
 	g.SetLimit(workers)
 
-	for _, img := range images {
+	results := make([]*ImageData, len(missing))
+	for i, img := range missing {
 		g.Go(func() error {
-			if _, found := idc.list[img]; found {
-				return nil
-			}
-
 			data, err := idc.f.FetchImageData(ctx, img, authOpts, nameOpts)
 			if err != nil {
 				return err
 			}
-			idc.list[img] = data
+			results[i] = data
 			return nil
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		return err
+	err := g.Wait()
+	for i, img := range missing {
+		if results[i] != nil {
+			idc.list[img] = results[i]
+		}
 	}
 
-	return nil
+	return err
 }
 
 func (idc *imageContext) Get(ctx context.Context, image string, authOpts []remote.Option, nameOpts []name.Option) (*ImageData, error) {
