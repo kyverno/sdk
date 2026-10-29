@@ -50,4 +50,53 @@ func Test_list_of_object_to_map(t *testing.T) {
 		// verify the output matches the desired map
 		assert.Equal(t, value, desiredMap)
 	})
+
+	t.Run("list_of_object_to_map_with_concatenated_lists", func(t *testing.T) {
+		desiredMap := map[string]any{
+			"kyverno":    "security",
+			"kubernetes": "orchestration",
+		}
+		ast, issues := env.Compile(
+			`transform.listObjToMap(
+        [{"name": "kyverno"}] + [{"name": "kubernetes"}],
+        [{"domain": "security"}] + [{"domain": "orchestration"}],
+        "name",
+        "domain")`)
+
+		assert.Nil(t, issues)
+		assert.NotNil(t, ast)
+		prog, err := env.Program(ast)
+		assert.NoError(t, err)
+
+		out, _, err := prog.Eval(map[string]any{})
+		assert.NoError(t, err)
+		value := out.Value().(map[string]any)
+
+		// concatenated lists must behave like plain literals (kyverno/kyverno#17577)
+		assert.Equal(t, value, desiredMap)
+	})
+
+	t.Run("list_of_object_to_map_with_single_concatenated_list", func(t *testing.T) {
+		desiredMap := map[string]any{
+			"a": "x",
+			"b": "y",
+		}
+		ast, issues := env.Compile(
+			`transform.listObjToMap(
+        [{"key": "a"}] + [{"key": "b"}],
+        [{"value": "x"}, {"value": "y"}],
+        "key",
+        "value")`)
+
+		assert.Nil(t, issues)
+		assert.NotNil(t, ast)
+		prog, err := env.Program(ast)
+		assert.NoError(t, err)
+
+		out, _, err := prog.Eval(map[string]any{})
+		assert.NoError(t, err)
+		value := out.Value().(map[string]any)
+
+		assert.Equal(t, value, desiredMap)
+	})
 }
