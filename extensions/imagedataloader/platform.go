@@ -32,16 +32,23 @@ func imageForDescriptor(desc *remote.Descriptor) (gcrv1.Image, bool, error) {
 	// A single image can be resolved directly. For multiple images, preserve the
 	// index when no child matches the default platform; otherwise let registry
 	// platform selection choose a child.
-	if len(images) != 1 {
-		if len(images) > 1 && !hasDefaultPlatform(images) {
+	switch len(images) {
+	case 0:
+		image, err := desc.Image()
+		return image, true, err
+
+	case 1:
+		image, err := index.Image(images[0].Digest)
+		return image, true, err
+
+	default:
+		if !hasDefaultPlatform(images) {
 			return nil, false, nil
 		}
+
 		image, err := desc.Image()
 		return image, true, err
 	}
-
-	image, err := index.Image(images[0].Digest)
-	return image, true, err
 }
 
 // referrers carry an artifact type, buildkit attestations an unknown platform

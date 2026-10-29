@@ -100,12 +100,12 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	}
 	img.desc = desc
 
-	remoteImg, hasMetadata, err := imageForDescriptor(desc)
+	remoteImg, hasImageMetadata, err := imageForDescriptor(desc)
 	if err != nil {
 		return nil, err
 	}
 
-	if hasMetadata {
+	if hasImageMetadata {
 		img.Manifest, err = remoteImg.Manifest()
 		if err != nil {
 			return nil, err
