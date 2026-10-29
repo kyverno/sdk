@@ -1,6 +1,7 @@
 package x509
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"testing"
 
@@ -108,4 +109,87 @@ func Test_decode(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode PEM block")
 	})
+}
+
+func Test_decodeKeyTypes(t *testing.T) {
+	ecdsaCert := `-----BEGIN CERTIFICATE-----
+MIIBqDCCAS+gAwIBAgIUW1FBrhAyjGuPjj0ibwzGkv9VFwwwCgYIKoZIzj0EAwIw
+HDEaMBgGA1UEAwwRZWNkc2Eua3l2ZXJuby5zdmMwHhcNMjYxMDE5MjExMDQyWhcN
+MzYxMDE2MjExMDQyWjAcMRowGAYDVQQDDBFlY2RzYS5reXZlcm5vLnN2YzB2MBAG
+ByqGSM49AgEGBSuBBAAiA2IABLdT6uPozqJcfEDMWZ67We/NeBvGSWtr5/+of8Xd
+PUTaAgiew9MnMt+5csbe8YO15eLRukXD0vtkC6oe5E3fzjb/c/0w9s0vXfhhzZxn
+K30VZ/qSHKBSVJtm0Fk45Fk1cqMyMDAwHQYDVR0OBBYEFNjnO1FXblirMJhFDirH
+wAesM06PMA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDZwAwZAIwNUC+rA+B
+DsMas6ulFde+lQl75b9+PhanS12klLMxEW+xeQrZQp0TQWAY4ttTGDxkAjBsqywB
+rhl665l2+SE5AsFevn7NA+aJFavdpkuiUKOkJ7yztkUaByndsnkaiTjdOrs=
+-----END CERTIFICATE-----
+`
+	ed25519Cert := `-----BEGIN CERTIFICATE-----
+MIIBLzCB4qADAgECAhRwu9HilalRUghukoCw8abzvt2ihjAFBgMrZXAwHjEcMBoG
+A1UEAwwTZWQyNTUxOS5reXZlcm5vLnN2YzAeFw0yNjEwMTkyMTEwNDJaFw0zNjEw
+MTYyMTEwNDJaMB4xHDAaBgNVBAMME2VkMjU1MTkua3l2ZXJuby5zdmMwKjAFBgMr
+ZXADIQB13f7C0MDNSP69gkHHHJ9852OZ1wqIdvlhxeBTVpMYqqMyMDAwHQYDVR0O
+BBYEFJYyU6pyJlAM9N5B+m/9BNDbWfE7MA8GA1UdEwEB/wQFMAMBAf8wBQYDK2Vw
+A0EAH/Ny5Afwvyb1j7aiP9ZP4AZL8pOoVe8FhJgZPIIPinQ0iZZCeFrr233BK2De
+cF5nv3ACd1zw8EaPy87uM0XHAA==
+-----END CERTIFICATE-----
+`
+	ecdsaCSR := `-----BEGIN CERTIFICATE REQUEST-----
+MIHUMHwCAQAwGjEYMBYGA1UEAwwPY3NyLmt5dmVybm8uc3ZjMFkwEwYHKoZIzj0C
+AQYIKoZIzj0DAQcDQgAE4R47v163Y4eiFCNKGEwMhiqJcjXCjBV0uXVpxAY61ojb
+bjVDvH75Q+hwomlkXqjaHZM9+kXS+UtIL2YC6N/BKKAAMAoGCCqGSM49BAMCA0gA
+MEUCIQD8BztUkjjMDBTmdEObMfl+9X2Deh8caxMBKEUXGLmqAQIgGPS55kPVsNjX
+AUhevj83b2V8mcslx1oNLx6TBOt1ueA=
+-----END CERTIFICATE REQUEST-----
+`
+	base, err := compiler.NewBaseEnv()
+	assert.NoError(t, err)
+	env, err := base.Extend(cel.Variable("cert", cel.StringType))
+	assert.NoError(t, err)
+	env, err = env.Extend(Lib(Latest()))
+	assert.NoError(t, err)
+	ast, issues := env.Compile(`x509.decode(cert)`)
+	assert.Nil(t, issues)
+	prog, err := env.Program(ast)
+	assert.NoError(t, err)
+
+	testCases := []struct {
+		name      string
+		pem       string
+		algorithm float64
+		publicKey map[string]any
+	}{{
+		name:      "ECDSA P-384 certificate",
+		pem:       ecdsaCert,
+		algorithm: float64(x509.ECDSA),
+		publicKey: map[string]any{
+			"Curve": "P-384",
+			"Point": "BLdT6uPozqJcfEDMWZ67We/NeBvGSWtr5/+of8XdPUTaAgiew9MnMt+5csbe8YO15eLRukXD0vtkC6oe5E3fzjb/c/0w9s0vXfhhzZxnK30VZ/qSHKBSVJtm0Fk45Fk1cg==",
+		},
+	}, {
+		name:      "Ed25519 certificate",
+		pem:       ed25519Cert,
+		algorithm: float64(x509.Ed25519),
+		publicKey: map[string]any{
+			"Key": "dd3+wtDAzUj+vYJBxxyffOdjmdcKiHb5YcXgU1aTGKo=",
+		},
+	}, {
+		name:      "ECDSA P-256 certificate request",
+		pem:       ecdsaCSR,
+		algorithm: float64(x509.ECDSA),
+	}}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, _, err := prog.Eval(map[string]any{"cert": tc.pem})
+			assert.NoError(t, err)
+			result := out.Value().(map[string]any)
+			assert.Equal(t, tc.algorithm, result["PublicKeyAlgorithm"])
+			publicKey := result["PublicKey"].(map[string]any)
+			if tc.publicKey != nil {
+				assert.Equal(t, tc.publicKey, publicKey)
+			} else {
+				assert.Equal(t, "P-256", publicKey["Curve"])
+			}
+		})
+	}
 }
