@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"sync"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	gcrv1 "github.com/google/go-containerregistry/pkg/v1"
@@ -70,8 +71,7 @@ func New(lister corev1listers.SecretLister, defaultAuthOpts []remote.Option, def
 
 func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, authOpts []remote.Option, nameOpts []name.Option) (*ImageData, error) {
 	img := ImageData{
-		referrersData: make(map[string]referrerData),
-		nameOpts:      nameOpts,
+		nameOpts: nameOpts,
 	}
 
 	// create the initial set of remote options and add to them the auth options
@@ -177,12 +177,20 @@ type referrerData struct {
 	data            []byte
 }
 
+// ImageData is safe for concurrent use. The referrers it caches and the payloads
+// recorded as verified are guarded by a mutex that is never held across a
+// registry call, so two callers missing the cache at once may both fetch.
+//
+// That does not make one ImageData safe to share across policies: what one
+// policy records as verified would be returned to another's GetPayload. Keep a
+// separate ImageData, and so a separate ImageContext, per policy.
 type ImageData struct {
 	ImageDescriptor        `json:",inline"`
 	remoteOpts             []remote.Option
 	nameOpts               []name.Option
 	nameRef                name.Reference
 	desc                   *remote.Descriptor
+	mu                     sync.Mutex // guards the fields below
 	referrersManifest      *gcrv1.IndexManifest
 	referrersData          map[string]referrerData
 	verifiedReferrers      map[string][]gcrv1.Descriptor
@@ -192,8 +200,12 @@ type ImageData struct {
 func (i *ImageData) FetchReference(identifier string) (ocispec.Descriptor, error) {
 	if identifier == i.Digest {
 		return GCRtoOCISpecDesc(i.desc.Descriptor), nil
-	} else if i.referrersManifest != nil {
-		for _, m := range i.referrersManifest.Manifests {
+	}
+	i.mu.Lock()
+	referrers := i.referrersManifest
+	i.mu.Unlock()
+	if referrers != nil {
+		for _, m := range referrers.Manifests {
 			if identifier == m.Digest.String() {
 				return GCRtoOCISpecDesc(m), nil
 			}
@@ -249,12 +261,13 @@ func (i *ImageData) FetchReferrersForDigest(digest string, artifactType string) 
 }
 
 func (i *ImageData) FetchReferrers(artifactType string) ([]gcrv1.Descriptor, error) {
-	if err := i.loadReferrers(); err != nil {
+	referrers, err := i.loadReferrers()
+	if err != nil {
 		return nil, err
 	}
 
 	refList := make([]gcrv1.Descriptor, 0)
-	for _, ref := range i.referrersManifest.Manifests {
+	for _, ref := range referrers.Manifests {
 		if ref.ArtifactType == artifactType {
 			refList = append(refList, ref)
 		}
@@ -264,11 +277,15 @@ func (i *ImageData) FetchReferrers(artifactType string) ([]gcrv1.Descriptor, err
 }
 
 func (i *ImageData) FetchReferrerData(desc gcrv1.Descriptor) ([]byte, *gcrv1.Descriptor, error) {
-	if v, found := i.referrersData[desc.Digest.String()]; found {
+	key := desc.Digest.String()
+	i.mu.Lock()
+	v, found := i.referrersData[key]
+	i.mu.Unlock()
+	if found {
 		return v.data, v.layerDescriptor, nil
 	}
 
-	img, err := remote.Image(i.nameRef.Context().Digest(desc.Digest.String()), i.remoteOpts...)
+	img, err := remote.Image(i.nameRef.Context().Digest(key), i.remoteOpts...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -307,7 +324,17 @@ func (i *ImageData) FetchReferrerData(desc gcrv1.Descriptor) ([]byte, *gcrv1.Des
 		return nil, nil, err
 	}
 
-	i.referrersData[desc.Digest.String()] = referrerData{
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	// keep data stored by a concurrent miss, so the bytes a caller verified are
+	// the bytes GetPayload returns later
+	if v, found := i.referrersData[key]; found {
+		return v.data, v.layerDescriptor, nil
+	}
+	if i.referrersData == nil {
+		i.referrersData = make(map[string]referrerData)
+	}
+	i.referrersData[key] = referrerData{
 		data:            b,
 		layerDescriptor: layerDesc,
 	}
@@ -317,6 +344,8 @@ func (i *ImageData) FetchReferrerData(desc gcrv1.Descriptor) ([]byte, *gcrv1.Des
 // AddVerifiedReferrer records desc as verified for its artifact type. Several
 // referrers of the same type can be recorded; a digest already recorded is ignored.
 func (i *ImageData) AddVerifiedReferrer(desc gcrv1.Descriptor) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	if i.verifiedReferrers == nil {
 		i.verifiedReferrers = make(map[string][]gcrv1.Descriptor, 0)
 	}
@@ -329,12 +358,40 @@ func (i *ImageData) AddVerifiedReferrer(desc gcrv1.Descriptor) {
 	i.verifiedReferrers[desc.ArtifactType] = append(i.verifiedReferrers[desc.ArtifactType], desc)
 }
 
+// SetVerifiedReferrers reorders or narrows the referrers recorded as verified
+// for artifactType to those in descs, in the order given. GetPayload reads the
+// first, so a caller can use this to choose which verified referrer it returns.
+// It never marks anything verified: a digest not already recorded through
+// AddVerifiedReferrer is ignored, and if none of descs is recorded the type is
+// cleared.
+func (i *ImageData) SetVerifiedReferrers(artifactType string, descs []gcrv1.Descriptor) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	recorded := i.verifiedReferrers[artifactType]
+	verified := make([]gcrv1.Descriptor, 0, len(recorded))
+	for _, desc := range descs {
+		sameDigest := func(d gcrv1.Descriptor) bool { return d.Digest == desc.Digest }
+		if n := slices.IndexFunc(recorded, sameDigest); n >= 0 && !slices.ContainsFunc(verified, sameDigest) {
+			verified = append(verified, recorded[n])
+		}
+	}
+	if len(verified) == 0 {
+		delete(i.verifiedReferrers, artifactType)
+		return
+	}
+	i.verifiedReferrers[artifactType] = verified
+}
+
 // VerifiedReferrers returns a copy of the referrers recorded as verified for artifactType.
 func (i *ImageData) VerifiedReferrers(artifactType string) []gcrv1.Descriptor {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	return slices.Clone(i.verifiedReferrers[artifactType])
 }
 
 func (i *ImageData) AddVerifiedIntotoPayloads(predicateType string, data []byte) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	if i.verifiedIntotoPayloads == nil {
 		i.verifiedIntotoPayloads = make(map[string][]byte, 0)
 	}
@@ -346,13 +403,15 @@ func (i *ImageData) GetPayload(a v1beta1.Attestation) (any, error) {
 	var b []byte
 	if a.IsInToto() {
 		var ok bool
+		i.mu.Lock()
 		b, ok = i.verifiedIntotoPayloads[a.InToto.Type]
+		i.mu.Unlock()
 		if !ok {
 			// download this using cosign cli
 			return nil, fmt.Errorf("intoto attestation payload cannot be fetch before verifying intoto attestation")
 		}
 	} else if a.IsReferrer() {
-		descs := i.verifiedReferrers[a.Referrer.Type]
+		descs := i.VerifiedReferrers(a.Referrer.Type)
 		if len(descs) == 0 {
 			return nil, fmt.Errorf("referrer attestation payload of type %s cannot be fetched before verifying referrer attestation", a.Referrer.Type)
 		}
@@ -376,18 +435,27 @@ func (i *ImageData) GetPayload(a v1beta1.Attestation) (any, error) {
 	return payload, nil
 }
 
-func (i *ImageData) loadReferrers() error {
-	if i.referrersManifest != nil {
-		return nil
+// loadReferrers returns the image's referrers, fetching them on first use. The
+// returned index is never modified, so it can be read without the lock.
+func (i *ImageData) loadReferrers() (*gcrv1.IndexManifest, error) {
+	i.mu.Lock()
+	referrers := i.referrersManifest
+	i.mu.Unlock()
+	if referrers != nil {
+		return referrers, nil
 	}
 
-	referrersDescs, err := i.fetchReferrersFromRemote(i.Digest)
+	referrers, err := i.fetchReferrersFromRemote(i.Digest)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	i.referrersManifest = referrersDescs
-	return nil
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.referrersManifest == nil {
+		i.referrersManifest = referrers
+	}
+	return i.referrersManifest, nil
 }
 
 func (i *ImageData) fetchReferrersFromRemote(digest string) (*gcrv1.IndexManifest, error) {

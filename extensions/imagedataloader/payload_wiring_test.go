@@ -52,14 +52,14 @@ func TestFetchReferrerData_HonoursConfiguredPayloadLimit(t *testing.T) {
 	desc := gcrv1.Descriptor{Digest: dig}
 
 	// At the default limit the production path refuses the payload.
-	atDefault := &ImageData{nameRef: ref, referrersData: make(map[string]referrerData)}
+	atDefault := &ImageData{nameRef: ref}
 	_, _, err := atDefault.FetchReferrerData(desc)
 	require.Error(t, err, "the default limit must refuse a 12 MB payload through FetchReferrerData")
 	assert.Contains(t, err.Error(), "exceeds")
 
 	// Raising the limit makes the same production path read it.
 	SetPayloadLimit(20 * 1000 * 1000)
-	raised := &ImageData{nameRef: ref, referrersData: make(map[string]referrerData)}
+	raised := &ImageData{nameRef: ref}
 	b, _, err := raised.FetchReferrerData(desc)
 	require.NoError(t, err, "a raised limit must let FetchReferrerData read the payload")
 	assert.Len(t, b, payload)
