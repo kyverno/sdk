@@ -20,7 +20,8 @@ var workers = 20
 
 // ImageContext stores a list of imagedata, it lives as long as
 // the admission request. Get request for images either returned a prefetched image or
-// fetches it from the registry. It is used to share image data for a policy across policies
+// fetches it from the registry. The ImageData it returns records what was verified,
+// so use one ImageContext per policy rather than sharing it across policies.
 type ImageContext interface {
 	AddImages(ctx context.Context, images []string, authOpts []remote.Option, nameOpts []name.Option) error
 	Get(ctx context.Context, image string, authOpts []remote.Option, nameOpts []name.Option) (*ImageData, error)
@@ -98,6 +99,11 @@ func (idc *imageContext) Get(ctx context.Context, image string, authOpts []remot
 	}
 	idc.Lock()
 	defer idc.Unlock()
+	// keep an entry stored by a concurrent miss, so every caller records
+	// verified state on the same ImageData
+	if existing, found := idc.list[image]; found {
+		return existing, nil
+	}
 	idc.list[image] = data
 
 	return data, nil

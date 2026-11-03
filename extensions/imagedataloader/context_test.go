@@ -92,6 +92,37 @@ func TestImageContextAddImagesConcurrentWorkers(t *testing.T) {
 	}
 }
 
+// Two misses for the same image must return the same ImageData, or verified
+// state recorded through one caller is lost when the other's entry replaces it.
+func TestImageContextGetConcurrentMissesShareImageData(t *testing.T) {
+	fetcher := &fakeFetcher{
+		calls:   map[string]int{},
+		overlap: 2,
+		release: make(chan struct{}),
+	}
+	ctx := &imageContext{
+		f:    fetcher,
+		list: map[string]*ImageData{},
+	}
+
+	got := make([]*ImageData, 2)
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Go(func() {
+			data, err := ctx.Get(context.Background(), "example.com/image:latest", nil, nil)
+			if err == nil {
+				got[i] = data
+			}
+		})
+	}
+	wg.Wait()
+
+	require.Equal(t, 2, fetcher.calls["example.com/image:latest"], "both calls must miss")
+	require.NotNil(t, got[0])
+	require.Same(t, got[0], got[1])
+	require.Same(t, got[0], ctx.list["example.com/image:latest"])
+}
+
 func TestImageContextAddImagesKeepsFetchedImagesOnError(t *testing.T) {
 	fetcher := &fakeFetcher{calls: map[string]int{}}
 	ctx := &imageContext{
