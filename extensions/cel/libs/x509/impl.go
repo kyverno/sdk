@@ -2,6 +2,8 @@ package x509
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -10,23 +12,35 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net"
 	"time"
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kyverno/sdk/extensions/cel/utils"
-	"golang.org/x/crypto/cryptobyte"
-	cryptobyte_asn1 "golang.org/x/crypto/cryptobyte/asn1"
 )
 
 type impl struct {
 	types.Adapter
 }
 
+// PublicKey is the encoded form of an RSA public key in x509.decode output.
 type PublicKey struct {
 	N string
 	E int
+}
+
+// ECDSAPublicKey is the encoded form of an ECDSA public key: the curve name
+// and the point in uncompressed SEC 1 form.
+type ECDSAPublicKey struct {
+	Curve string
+	Point []byte
+}
+
+// Ed25519PublicKey is the encoded form of an Ed25519 public key.
+type Ed25519PublicKey struct {
+	Key []byte
 }
 
 type CertificateOutput struct {
@@ -37,7 +51,7 @@ type CertificateOutput struct {
 	RawIssuer                   string
 	Signature                   string
 	PublicKeyAlgorithm          x509.PublicKeyAlgorithm
-	PublicKey                   PublicKey
+	PublicKey                   any
 	SerialNumber                int64
 	Issuer                      pkix.Name
 	NotBefore                   string
@@ -78,7 +92,7 @@ func encodeCertificate(cert *x509.Certificate) (map[string]any, error) {
 		RawIssuer:                   base64Encode(cert.RawIssuer),
 		Signature:                   base64Encode(cert.Signature),
 		PublicKeyAlgorithm:          cert.PublicKeyAlgorithm,
-		PublicKey:                   cert.PublicKey.(PublicKey),
+		PublicKey:                   cert.PublicKey,
 		SerialNumber:                cert.SerialNumber.Int64(),
 		Issuer:                      cert.Issuer,
 		NotBefore:                   cert.NotBefore.Format(time.RFC3339),
@@ -156,16 +170,8 @@ func (c *impl) decode(val ref.Val) ref.Val {
 		if err != nil {
 			return types.WrapErr(err)
 		}
-		if cert.PublicKeyAlgorithm != x509.RSA {
-			return types.WrapErr(errors.New("certificate should use rsa algorithm"))
-		}
-		pk, err := parseSubjectPublicKeyInfo(cert.RawSubjectPublicKeyInfo)
-		if err != nil {
-			return types.WrapErr(errors.New("failed to parse subject public key info"))
-		}
-		cert.PublicKey = PublicKey{
-			N: pk.N.String(),
-			E: pk.E,
+		if cert.PublicKey, err = encodePublicKey(cert.PublicKey); err != nil {
+			return types.WrapErr(err)
 		}
 		result, err := encodeCertificate(cert)
 		if err != nil {
@@ -178,16 +184,8 @@ func (c *impl) decode(val ref.Val) ref.Val {
 		if err != nil {
 			return types.WrapErr(err)
 		}
-		if csr.PublicKeyAlgorithm != x509.RSA {
-			return types.WrapErr(errors.New("certificate should use rsa algorithm"))
-		}
-		pk, err := parseSubjectPublicKeyInfo(csr.RawSubjectPublicKeyInfo)
-		if err != nil {
-			return types.WrapErr(errors.New("failed to parse subject public key info"))
-		}
-		csr.PublicKey = PublicKey{
-			N: pk.N.String(),
-			E: pk.E,
+		if csr.PublicKey, err = encodePublicKey(csr.PublicKey); err != nil {
+			return types.WrapErr(err)
 		}
 		result, err := encode(csr)
 		if err != nil {
@@ -200,22 +198,19 @@ func (c *impl) decode(val ref.Val) ref.Val {
 	}
 }
 
-func parseSubjectPublicKeyInfo(data []byte) (*rsa.PublicKey, error) {
-	spki := cryptobyte.String(data)
-	if !spki.ReadASN1(&spki, cryptobyte_asn1.SEQUENCE) {
-		return nil, errors.New("writing asn.1 element to 'spki' failed")
+func encodePublicKey(key any) (any, error) {
+	switch k := key.(type) {
+	case *rsa.PublicKey:
+		return PublicKey{N: k.N.String(), E: k.E}, nil
+	case *ecdsa.PublicKey:
+		point, err := k.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		return ECDSAPublicKey{Curve: k.Curve.Params().Name, Point: point}, nil
+	case ed25519.PublicKey:
+		return Ed25519PublicKey{Key: k}, nil
+	default:
+		return nil, fmt.Errorf("unsupported public key type %T", key)
 	}
-	var pkAISeq cryptobyte.String
-	if !spki.ReadASN1(&pkAISeq, cryptobyte_asn1.SEQUENCE) {
-		return nil, errors.New("writing asn.1 element to 'pkAISeq' failed")
-	}
-	var spk asn1.BitString
-	if !spki.ReadASN1BitString(&spk) {
-		return nil, errors.New("writing asn.1 bit string to 'spk' failed")
-	}
-	kk, err := x509.ParsePKCS1PublicKey(spk.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	return kk, nil
 }
