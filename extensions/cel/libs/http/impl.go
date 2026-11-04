@@ -77,6 +77,6 @@ func (c *impl) http_client_string(request, caBundle ref.Val) ref.Val {
 		if err != nil {
 			return types.NewErr("request failed: %v", err)
 		}
-		return c.NativeToValue(caRequest)
+		return c.NativeToValue(Context{ContextInterface: caRequest})
 	}
 }
