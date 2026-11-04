@@ -49,6 +49,17 @@ func platformChild(t *testing.T, os, arch string) mutate.IndexAddendum {
 	}
 }
 
+func platformChildWithVersion(t *testing.T, os, arch, version string) mutate.IndexAddendum {
+	t.Helper()
+
+	return mutate.IndexAddendum{
+		Add: platformImage(t, os, arch),
+		Descriptor: gcrv1.Descriptor{
+			Platform: &gcrv1.Platform{OS: os, Architecture: arch, OSVersion: version},
+		},
+	}
+}
+
 func startRegistry(t *testing.T) string {
 	t.Helper()
 
@@ -65,10 +76,11 @@ func TestFetchImageData_IndexPlatformSelection(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		children []mutate.IndexAddendum
-		wantArch string
-		wantErr  string
+		name      string
+		children  []mutate.IndexAddendum
+		wantArch  string
+		wantIndex bool
+		wantErr   string
 	}{{
 		name:     "single arm64 image is selected",
 		children: []mutate.IndexAddendum{platformChild(t, "linux", "arm64")},
@@ -92,12 +104,40 @@ func TestFetchImageData_IndexPlatformSelection(t *testing.T) {
 		},
 		wantArch: "amd64",
 	}, {
-		name: "multi platform index is left to platform selection",
+		name: "windows-only multi platform index is kept as index",
+		children: []mutate.IndexAddendum{
+			platformChildWithVersion(t, "windows", "amd64", "10.0.14393.9512"),
+			platformChildWithVersion(t, "windows", "amd64", "10.0.17763.9245"),
+		},
+		wantIndex: true,
+	}, {
+		name: "windows index with empty OS version",
+		children: []mutate.IndexAddendum{
+			platformChildWithVersion(t, "windows", "amd64", ""),
+			platformChildWithVersion(t, "windows", "amd64", "10.0.17763.9245"),
+		},
+		wantIndex: true,
+	}, {
+		name: "windows index with empty OS version in the second child",
+		children: []mutate.IndexAddendum{
+			platformChildWithVersion(t, "windows", "amd64", "10.0.17763.9245"),
+			platformChildWithVersion(t, "windows", "amd64", ""),
+		},
+		wantIndex: true,
+	}, {
+		name: "multi platform index without default platform is preserved",
 		children: []mutate.IndexAddendum{
 			platformChild(t, "linux", "arm64"),
 			platformChild(t, "linux", "s390x"),
 		},
-		wantErr: "no child with platform linux/amd64",
+		wantIndex: true,
+	}, {
+		name: "windows index with multiple architectures is preserved",
+		children: []mutate.IndexAddendum{
+			platformChild(t, "windows", "amd64"),
+			platformChild(t, "windows", "arm64"),
+		},
+		wantIndex: true,
 	}, {
 		name:    "index holding no images is left to platform selection",
 		wantErr: "no child with platform linux/amd64",
@@ -123,8 +163,14 @@ func TestFetchImageData_IndexPlatformSelection(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tt.wantArch, data.ConfigData.Architecture)
-			assert.NotNil(t, data.ImageIndex)
+			if tt.wantIndex {
+				assert.Nil(t, data.ConfigData)
+				assert.Nil(t, data.Manifest)
+				assert.NotNil(t, data.ImageIndex)
+			} else {
+				assert.Equal(t, tt.wantArch, data.ConfigData.Architecture)
+				assert.NotNil(t, data.ImageIndex)
+			}
 
 			indexDigest, err := mutate.AppendManifests(empty.Index, tt.children...).Digest()
 			require.NoError(t, err)
