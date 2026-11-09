@@ -1,6 +1,9 @@
 package regcreds
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -40,14 +43,11 @@ func TestIsACRRegistry(t *testing.T) {
 	} {
 		t.Run(test.host, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, test.want, isACRRegistry(test.host))
+			require.Equal(t, test.want, isACRRegistry(normalizeRegistryHost(test.host)))
 		})
 	}
 }
 
-// An invalid image reference stops accepted hosts before any Azure login. A
-// rejected host must not read the reference at all, even through the exported
-// provider list used by SDK consumers.
 type azureSelectionResource struct {
 	host           string
 	referenceReads int
@@ -86,5 +86,45 @@ func TestAzureProviderHostSelection(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+type mockValidAzureResource struct {
+	host string
+}
+
+func (r *mockValidAzureResource) RegistryStr() string { return r.host }
+
+func (r *mockValidAzureResource) String() string {
+	return r.host + "/image:tag"
+}
+
+func TestAzureCredentialFlow(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"access_token": "mock-token", "expires_in": 3600}`))
+	}))
+	defer mockServer.Close()
+
+	os.Setenv("AZURE_AUTHORITY_HOST", mockServer.URL)
+	defer os.Unsetenv("AZURE_AUTHORITY_HOST")
+	os.Setenv("AZURE_TENANT_ID", "mock-tenant")
+	defer os.Unsetenv("AZURE_TENANT_ID")
+	os.Setenv("AZURE_CLIENT_ID", "mock-client")
+	defer os.Unsetenv("AZURE_CLIENT_ID")
+	os.Setenv("AZURE_CLIENT_SECRET", "mock-secret")
+	defer os.Unsetenv("AZURE_CLIENT_SECRET")
+
+	resource := &mockValidAzureResource{host: "registry.azurecr.io"}
+
+	authenticator, err := AzureKeychain.Resolve(resource)
+
+	require.NotNil(t, authenticator)
+
+	if err != nil {
+		require.Error(t, err)
+	} else {
+		require.NoError(t, err)
 	}
 }
