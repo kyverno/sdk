@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"github.com/awslabs/amazon-ecr-credential-helper/ecr-login"
-	"github.com/fluxcd/pkg/oci/auth/azure"
+	"github.com/fluxcd/pkg/auth"
+	"github.com/fluxcd/pkg/auth/azure"
 	"github.com/go-logr/logr"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/authn/github"
@@ -221,17 +222,19 @@ func (azureKeyChain) Resolve(resource authn.Resource) (authn.Authenticator, erro
 		return authn.Anonymous, nil
 	}
 
-	ref, err := name.ParseReference(resource.String())
+	// Fail fast if the reference is invalid before making external Azure API calls
+	_, err := name.ParseReference(resource.String())
 	if err != nil {
 		return authn.Anonymous, err
 	}
 
-	azClient := azure.NewClient()
-	auth, err := azClient.Login(context.TODO(), true, resource.String(), ref)
+	azProvider := &azure.Provider{}
+	authnCreds, err := auth.GetArtifactRegistryCredentials(context.TODO(), azProvider, resource.RegistryStr())
 	if err != nil {
 		return authn.Anonymous, err
 	}
-	return auth, nil
+
+	return authnCreds, nil
 }
 
 func isACRRegistry(input string) bool {
@@ -241,5 +244,7 @@ func isACRRegistry(input string) bool {
 	}
 
 	host := strings.ToLower(strings.TrimSuffix(serverURL.Hostname(), "."))
-	return azure.ValidHost(host)
+	azProvider := &azure.Provider{}
+	_, err = azProvider.ParseArtifactRepository(host)
+	return err == nil
 }
