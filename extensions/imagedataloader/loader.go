@@ -177,9 +177,11 @@ type referrerData struct {
 	data            []byte
 }
 
-// ImageData is safe for concurrent use. The referrers it caches and the payloads
-// recorded as verified are guarded by a mutex that is never held across a
-// registry call, so two callers missing the cache at once may both fetch.
+// ImageData is safe for concurrent use. The referrers it caches (the image's own
+// referrers index, the referrers indexes fetched for other digests, and referrer
+// data) and the payloads recorded as verified are guarded by a mutex that is
+// never held across a registry call, so two callers missing the cache at once
+// may both fetch.
 //
 // That does not make one ImageData safe to share across policies: what one
 // policy records as verified would be returned to another's GetPayload. Keep a
@@ -192,6 +194,7 @@ type ImageData struct {
 	desc                   *remote.Descriptor
 	mu                     sync.Mutex // guards the fields below
 	referrersManifest      *gcrv1.IndexManifest
+	referrerIndexes        map[string]*gcrv1.IndexManifest
 	referrersData          map[string]referrerData
 	verifiedReferrers      map[string][]gcrv1.Descriptor
 	verifiedIntotoPayloads map[string][]byte
@@ -245,7 +248,7 @@ func (i *ImageData) FetchReferrersForDigest(digest string, artifactType string) 
 	}
 
 	// this is most likely a call to fetch notary signatures for an attesatation
-	idx, err := i.fetchReferrersFromRemote(digest)
+	idx, err := i.loadReferrersForDigest(digest)
 	if err != nil {
 		return nil, err
 	}
@@ -456,6 +459,36 @@ func (i *ImageData) loadReferrers() (*gcrv1.IndexManifest, error) {
 		i.referrersManifest = referrers
 	}
 	return i.referrersManifest, nil
+}
+
+// loadReferrersForDigest returns the referrers of digest, a digest other than
+// the image's own, fetching them on first use. Errors are not cached, so a
+// failed fetch is retried on the next call. The returned index is never
+// modified, so it can be read without the lock.
+func (i *ImageData) loadReferrersForDigest(digest string) (*gcrv1.IndexManifest, error) {
+	i.mu.Lock()
+	referrers := i.referrerIndexes[digest]
+	i.mu.Unlock()
+	if referrers != nil {
+		return referrers, nil
+	}
+
+	referrers, err := i.fetchReferrersFromRemote(digest)
+	if err != nil {
+		return nil, err
+	}
+
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	// keep an index stored by a concurrent miss, so every caller sees one listing
+	if v, found := i.referrerIndexes[digest]; found {
+		return v, nil
+	}
+	if i.referrerIndexes == nil {
+		i.referrerIndexes = make(map[string]*gcrv1.IndexManifest)
+	}
+	i.referrerIndexes[digest] = referrers
+	return referrers, nil
 }
 
 func (i *ImageData) fetchReferrersFromRemote(digest string) (*gcrv1.IndexManifest, error) {
