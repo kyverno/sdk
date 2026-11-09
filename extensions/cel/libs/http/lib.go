@@ -16,18 +16,21 @@ const libraryName = "kyverno.http"
 type lib struct {
 	httpIface ContextInterface
 	version   *version.Version
+	readOnly  bool
 }
 
 func Latest() *version.Version {
 	return versions.KyvernoLatest
 }
 
-func Lib(httpCtx ContextInterface, v *version.Version) cel.EnvOption {
+// Lib returns the http cel library. When readOnly is true, only functions that
+// do not mutate remote state are registered (post is omitted).
+func Lib(httpCtx ContextInterface, v *version.Version, readOnly bool) cel.EnvOption {
 	if v == nil {
 		panic(libraryName + ": library version must not be nil")
 	}
 	// create the cel lib env option
-	return cel.Lib(&lib{httpIface: httpCtx, version: v})
+	return cel.Lib(&lib{httpIface: httpCtx, version: v, readOnly: readOnly})
 }
 
 func (*lib) LibraryName() string {
@@ -112,6 +115,10 @@ func (c *lib) extendEnv(env *cel.Env) (*cel.Env, error) {
 		libraryDecls["get"] = buildGetOverloads("camel")
 		libraryDecls["post"] = buildPostOverloads("camel")
 		libraryDecls["client"] = buildClientOverloads("camel")
+	}
+	if c.readOnly {
+		delete(libraryDecls, "Post")
+		delete(libraryDecls, "post")
 	}
 	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}
