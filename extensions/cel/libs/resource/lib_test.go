@@ -16,7 +16,7 @@ func TestLib(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("resource", ContextType),
-		Lib(nil, "", version.MajorMinor(1, 18)),
+		Lib(nil, "", version.MajorMinor(1, 18), false),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -29,7 +29,7 @@ func TestNamespaceLib(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("resource", ContextType),
-		Lib(nil, "default", version.MajorMinor(1, 18)),
+		Lib(nil, "default", version.MajorMinor(1, 18), false),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -49,9 +49,26 @@ func TestLib_RegistersGroupVersionResource(t *testing.T) {
 	for _, namespace := range []string{"", "default"} {
 		base, err := compiler.NewBaseEnv()
 		assert.NoError(t, err)
-		env, err := base.Extend(Lib(nil, namespace, version.MajorMinor(1, 18)))
+		env, err := base.Extend(Lib(nil, namespace, version.MajorMinor(1, 18), false))
 		assert.NoError(t, err)
 		_, found := env.CELTypeProvider().FindStructType("schema.GroupVersionResource")
 		assert.True(t, found, "namespace %q", namespace)
+	}
+}
+
+func TestLib_ReadOnly(t *testing.T) {
+	for _, namespace := range []string{"", "default"} {
+		for _, readOnly := range []bool{false, true} {
+			base, err := compiler.NewBaseEnv()
+			assert.NoError(t, err)
+			env, err := base.Extend(Lib(nil, namespace, version.MajorMinor(1, 18), readOnly))
+			assert.NoError(t, err)
+			for _, fn := range []string{"post", "Post"} {
+				assert.Equal(t, !readOnly, env.HasFunction(fn), "namespace %q, readOnly %v, function %s", namespace, readOnly, fn)
+			}
+			for _, fn := range []string{"get", "Get", "list", "List", "toGVR", "ToGVR"} {
+				assert.True(t, env.HasFunction(fn), "namespace %q, readOnly %v, function %s", namespace, readOnly, fn)
+			}
+		}
 	}
 }

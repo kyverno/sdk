@@ -18,18 +18,21 @@ type lib struct {
 	resourceIface ContextInterface
 	namespace     string
 	version       *version.Version
+	readOnly      bool
 }
 
 func Latest() *version.Version {
 	return versions.KyvernoLatest
 }
 
-func Lib(resourceCtx ContextInterface, namespace string, v *version.Version) cel.EnvOption {
+// Lib returns the resource cel library. When readOnly is true, only functions
+// that do not mutate cluster state are registered (post is omitted).
+func Lib(resourceCtx ContextInterface, namespace string, v *version.Version, readOnly bool) cel.EnvOption {
 	if v == nil {
 		panic(libraryName + ": library version must not be nil")
 	}
 	// create the cel lib env option
-	return cel.Lib(&lib{resourceIface: resourceCtx, namespace: namespace, version: v})
+	return cel.Lib(&lib{resourceIface: resourceCtx, namespace: namespace, version: v, readOnly: readOnly})
 }
 
 func (*lib) LibraryName() string {
@@ -147,6 +150,10 @@ func (l *lib) namespacedEnv(env *cel.Env) (*cel.Env, error) {
 		libraryDecls["post"] = buildPostOverloads("camel")
 		libraryDecls["toGVR"] = buildToGVROverloads("camel")
 	}
+	if l.readOnly {
+		delete(libraryDecls, "Post")
+		delete(libraryDecls, "post")
+	}
 	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}
 	for name, overloads := range libraryDecls {
@@ -242,6 +249,10 @@ func (l *lib) clusterEnv(env *cel.Env) (*cel.Env, error) {
 		libraryDecls["get"] = buildGetOverloads("camel")
 		libraryDecls["post"] = buildPostOverloads("camel")
 		libraryDecls["toGVR"] = buildToGVROverloads("camel")
+	}
+	if l.readOnly {
+		delete(libraryDecls, "Post")
+		delete(libraryDecls, "post")
 	}
 	// create env options corresponding to our function overloads
 	options := []cel.EnvOption{}

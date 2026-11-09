@@ -63,7 +63,7 @@ func Test_impl_get_request(t *testing.T) {
 
 	// lowercase functions have been introduced since version 2.0 of the library
 	env, err := base.Extend(
-		Lib(&ctx, version.MajorMinor(1, 18)),
+		Lib(&ctx, version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -110,7 +110,7 @@ func Test_impl_get_request_with_headers(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, version.MajorMinor(1, 18)),
+		Lib(&ctx, version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -146,7 +146,7 @@ func Test_impl_get_request_with_client_string_error(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, version.MajorMinor(1, 18)),
+		Lib(nil, version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -203,7 +203,7 @@ func Test_impl_post_request(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, version.MajorMinor(1, 18)),
+		Lib(&ctx, version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -245,7 +245,7 @@ func Test_impl_post_request_with_headers(t *testing.T) {
 	}}
 
 	env, err := base.Extend(
-		Lib(&ctx, version.MajorMinor(1, 18)),
+		Lib(&ctx, version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -270,7 +270,7 @@ func Test_impl_post_request_string_with_client_error(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, version.MajorMinor(1, 18)),
+		Lib(nil, version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -317,7 +317,7 @@ func Test_impl_http_client_string(t *testing.T) {
 
 	env, err := base.Extend(
 		cel.Variable("pem", types.StringType),
-		Lib(&ctx, version.MajorMinor(1, 18)),
+		Lib(&ctx, version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -343,7 +343,7 @@ func Test_impl_http_client_string_error(t *testing.T) {
 	assert.NotNil(t, base)
 
 	env, err := base.Extend(
-		Lib(nil, version.MajorMinor(1, 18)),
+		Lib(nil, version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -375,7 +375,7 @@ func Test_impl_get_request_with_404_status_code(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, version.MajorMinor(1, 18)),
+		Lib(nil, version.MajorMinor(1, 18), false),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -410,7 +410,7 @@ func Test_impl_get_request_with_500_status_code(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, version.MajorMinor(1, 18)),
+		Lib(nil, version.MajorMinor(1, 18), false),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -445,7 +445,7 @@ func Test_impl_post_request_with_201_status_code(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, version.MajorMinor(1, 18)),
+		Lib(nil, version.MajorMinor(1, 18), false),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -480,7 +480,7 @@ func Test_impl_get_request_with_non_json_body(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, version.MajorMinor(1, 18)),
+		Lib(nil, version.MajorMinor(1, 18), false),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -516,7 +516,7 @@ func Test_impl_get_request_with_array_response(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, version.MajorMinor(1, 18)),
+		Lib(nil, version.MajorMinor(1, 18), false),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)
@@ -704,7 +704,7 @@ func Test_impl_post_request_with_400_bad_request(t *testing.T) {
 	assert.NotNil(t, base)
 	options := []cel.EnvOption{
 		cel.Variable("http", ContextType),
-		Lib(nil, version.MajorMinor(1, 18)),
+		Lib(nil, version.MajorMinor(1, 18), false),
 	}
 	env, err := base.Extend(options...)
 	assert.NoError(t, err)

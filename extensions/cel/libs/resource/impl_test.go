@@ -66,7 +66,7 @@ func Test_impl_get_resource_string_string_string_string(t *testing.T) {
 		},
 	}
 	env, err := base.Extend(
-		Lib(&ctx, "", version.MajorMinor(1, 18)),
+		Lib(&ctx, "", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -90,7 +90,7 @@ func Test_impl_get_resource_string_string_string_string_error(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, base)
 	env, err := base.Extend(
-		Lib(nil, "default", version.MajorMinor(1, 18)),
+		Lib(nil, "default", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -159,7 +159,7 @@ func Test_impl_list_resources_string_string_string(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", version.MajorMinor(1, 18)),
+		Lib(&ctx, "", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -207,7 +207,7 @@ func Test_impl_list_resources_string_string_string_map(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", version.MajorMinor(1, 18)),
+		Lib(&ctx, "", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -231,7 +231,7 @@ func Test_impl_list_resources_string_string_string_error(t *testing.T) {
 	assert.NotNil(t, base)
 	env, err := base.Extend(
 		cel.Variable("resource", ContextType),
-		Lib(nil, "default", version.MajorMinor(1, 18)),
+		Lib(nil, "default", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -289,7 +289,7 @@ func Test_post_resource_string_string_string_map(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", version.MajorMinor(1, 18)),
+		Lib(&ctx, "", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -328,7 +328,7 @@ func Test_impl_post_resource_string_string_string_map_error(t *testing.T) {
 	assert.NotNil(t, base)
 	env, err := base.Extend(
 		cel.Variable("resource", ContextType),
-		Lib(nil, "default", version.MajorMinor(1, 18)),
+		Lib(nil, "default", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -376,7 +376,7 @@ func Test_impl_post_resource_string_string_map_error(t *testing.T) {
 	assert.NotNil(t, base)
 	env, err := base.Extend(
 		cel.Variable("resource", ContextType),
-		Lib(nil, "default", version.MajorMinor(1, 18)),
+		Lib(nil, "default", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -416,7 +416,7 @@ func Test_impl_list_resources_forbidden_error(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", version.MajorMinor(1, 18)),
+		Lib(&ctx, "", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -450,7 +450,7 @@ func Test_impl_get_resource_forbidden_error(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", version.MajorMinor(1, 18)),
+		Lib(&ctx, "", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -484,7 +484,7 @@ func Test_impl_post_resource_forbidden_error(t *testing.T) {
 	}
 
 	env, err := base.Extend(
-		Lib(&ctx, "", version.MajorMinor(1, 18)),
+		Lib(&ctx, "", version.MajorMinor(1, 18), false),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, env)
@@ -569,7 +569,7 @@ func Test_impl_convert_to_gvr_string_string(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env, err := base.Extend(
-				Lib(&ctx, tt.namespace, version.MajorMinor(1, 18)),
+				Lib(&ctx, tt.namespace, version.MajorMinor(1, 18), false),
 			)
 			assert.NoError(t, err)
 			expr := tt.expr
