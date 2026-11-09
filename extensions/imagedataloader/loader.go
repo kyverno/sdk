@@ -101,26 +101,31 @@ func (i *imagedatafetcher) FetchImageData(ctx context.Context, image string, aut
 	}
 	img.desc = desc
 
-	remoteImg, err := imageForDescriptor(desc)
+	remoteImg, hasImageMetadata, err := imageForDescriptor(desc)
 	if err != nil {
 		return nil, err
 	}
 
-	img.Manifest, err = remoteImg.Manifest()
-	if err != nil {
-		return nil, err
-	}
+	if hasImageMetadata {
+		img.Manifest, err = remoteImg.Manifest()
+		if err != nil {
+			return nil, err
+		}
 
-	// an attacker-authored config descriptor otherwise sizes this read
-	if img.Manifest.Config.Size > defaultPayloadLimit {
-		return nil, fmt.Errorf("config size %d exceeds %d", img.Manifest.Config.Size, defaultPayloadLimit)
-	}
+		// an attacker-authored config descriptor otherwise sizes this read
+		if img.Manifest.Config.Size > defaultPayloadLimit {
+			return nil, fmt.Errorf(
+				"config size %d exceeds %d",
+				img.Manifest.Config.Size,
+				defaultPayloadLimit,
+			)
+		}
 
-	img.ConfigData, err = remoteImg.ConfigFile()
-	if err != nil {
-		return nil, err
+		img.ConfigData, err = remoteImg.ConfigFile()
+		if err != nil {
+			return nil, err
+		}
 	}
-
 	if len(img.Digest) == 0 {
 		img.Digest = desc.Digest.String()
 	}
