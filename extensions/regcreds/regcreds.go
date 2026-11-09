@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"github.com/awslabs/amazon-ecr-credential-helper/ecr-login"
-	"github.com/fluxcd/pkg/oci/auth/azure"
+	"github.com/fluxcd/pkg/auth"
+	"github.com/fluxcd/pkg/auth/azure"
 	"github.com/go-logr/logr"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/authn/github"
@@ -217,29 +218,39 @@ func parseSecretReference(secretRef string, defaultNamespace string) (namespace 
 type azureKeyChain struct{}
 
 func (azureKeyChain) Resolve(resource authn.Resource) (authn.Authenticator, error) {
-	if !isACRRegistry(resource.RegistryStr()) {
+	// Normalize the host exactly like the validation gate does
+	normalizedHost := normalizeRegistryHost(resource.RegistryStr())
+
+	if !isACRRegistry(normalizedHost) {
 		return authn.Anonymous, nil
 	}
 
-	ref, err := name.ParseReference(resource.String())
+	// Fail fast if the reference is invalid before making external Azure API calls
+	_, err := name.ParseReference(resource.String())
 	if err != nil {
 		return authn.Anonymous, err
 	}
 
-	azClient := azure.NewClient()
-	auth, err := azClient.Login(context.TODO(), true, resource.String(), ref)
+	azProvider := &azure.Provider{}
+	// Pass the normalized host to the credential fetcher
+	authnCreds, err := auth.GetArtifactRegistryCredentials(context.TODO(), azProvider, normalizedHost)
 	if err != nil {
 		return authn.Anonymous, err
 	}
-	return auth, nil
+
+	return authnCreds, nil
 }
 
-func isACRRegistry(input string) bool {
+func normalizeRegistryHost(input string) string {
 	serverURL, err := url.Parse("https://" + input)
 	if err != nil {
-		return false
+		return input
 	}
+	return strings.ToLower(strings.TrimSuffix(serverURL.Hostname(), "."))
+}
 
-	host := strings.ToLower(strings.TrimSuffix(serverURL.Hostname(), "."))
-	return azure.ValidHost(host)
+func isACRRegistry(normalizedHost string) bool {
+	azProvider := &azure.Provider{}
+	_, err := azProvider.ParseArtifactRepository(normalizedHost)
+	return err == nil
 }
